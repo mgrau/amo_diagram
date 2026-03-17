@@ -163,18 +163,16 @@
     persistLocalDiagrams();
   }
 
+  const hasLocalStorage = typeof localStorage !== "undefined";
+
   function persistLocalDiagrams(): void {
-    if (typeof localStorage === "undefined") {
-      return;
-    }
+    if (!hasLocalStorage) return;
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(localDiagrams));
   }
 
   function setSelectedDiagram(diagram: MenuDiagram): void {
     selectedDiagram = diagram;
-    if (typeof localStorage === "undefined") {
-      return;
-    }
+    if (!hasLocalStorage) return;
     localStorage.setItem(SELECTED_DIAGRAM_KEY, JSON.stringify({
       id: diagram.id,
       source: diagram.source
@@ -182,9 +180,7 @@
   }
 
   onMount(() => {
-    if (typeof localStorage === "undefined") {
-      return;
-    }
+    if (!hasLocalStorage) return;
     try {
       const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
       if (!raw) {
@@ -235,40 +231,36 @@
     ensureMathJax().then(() => rerender(yamlText));
   });
 
+  function parseYamlMetadata(yamlSource: string): Record<string, unknown> | undefined {
+    try {
+      const parsed = YAML.parse(yamlSource);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && "metadata" in parsed) {
+        return parsed.metadata as Record<string, unknown> | undefined;
+      }
+    } catch {
+      // ignore parse errors
+    }
+    return undefined;
+  }
+
   function deriveLocalDiagramMetadata(
     yamlSource: string,
     fallbackName: string,
     fallbackDescription: string
   ): { name: string; description: string } {
-    try {
-      const parsed = YAML.parse(yamlSource);
-      const metadata = parsed && typeof parsed === "object" && !Array.isArray(parsed) && "metadata" in parsed
-        ? (parsed.metadata as Record<string, unknown> | undefined)
-        : undefined;
-      const name = typeof metadata?.name === "string" && metadata.name.trim()
-        ? metadata.name.trim()
-        : typeof metadata?.element === "string" && metadata.element.trim()
-          ? metadata.element.trim()
-          : fallbackName;
-      const description = typeof metadata?.title === "string"
-        ? metadata.title.trim()
-        : "";
-      return { name, description };
-    } catch {
-      return { name: fallbackName, description: fallbackDescription };
-    }
+    const metadata = parseYamlMetadata(yamlSource);
+    const name = typeof metadata?.name === "string" && metadata.name.trim()
+      ? metadata.name.trim()
+      : typeof metadata?.element === "string" && metadata.element.trim()
+        ? metadata.element.trim()
+        : fallbackName;
+    const description = typeof metadata?.title === "string" ? metadata.title.trim() : "";
+    return { name, description: description || fallbackDescription };
   }
 
   function exampleDiagramSubtitle(yamlSource: string): string {
-    try {
-      const parsed = YAML.parse(yamlSource);
-      const metadata = parsed && typeof parsed === "object" && !Array.isArray(parsed) && "metadata" in parsed
-        ? (parsed.metadata as Record<string, unknown> | undefined)
-        : undefined;
-      return typeof metadata?.title === "string" ? metadata.title.trim() : "";
-    } catch {
-      return "";
-    }
+    const metadata = parseYamlMetadata(yamlSource);
+    return typeof metadata?.title === "string" ? metadata.title.trim() : "";
   }
 
   function emptyDiagramTemplate(name: string): string {

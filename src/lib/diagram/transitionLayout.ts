@@ -83,8 +83,8 @@ export function anchorFromX(state: StateLayout, x: number): number {
   return (x - state.x_left) / Math.max(state.x_right - state.x_left, 1e-9);
 }
 
-export function clampAnchor(anchor: number): number {
-  return Math.max(0.08, Math.min(0.92, anchor));
+export function clampAnchor(anchor: number, policy: Pick<LayoutPolicy, "axes_x_min" | "axes_x_max">): number {
+  return Math.max(policy.axes_x_min, Math.min(policy.axes_x_max, anchor));
 }
 
 function endpointAngleKey(spec: EndpointSpec, layout: LayoutResult): number {
@@ -132,7 +132,7 @@ function simulatedAnnealing(
       const candidate = { ...anchors };
 
       const key = allKeys[Math.floor(rng() * allKeys.length)];
-      candidate[key] = clampAnchor(anchors[key] + gaussianRandom(rng) * policy.anchor_sa_perturb_sigma);
+      candidate[key] = clampAnchor(anchors[key] + gaussianRandom(rng) * policy.anchor_sa_perturb_sigma, policy);
 
       const newEnergy = anchorScore(candidate, transitions, layout, stateEndpoints, policy, polylineBuilder);
       const dE = newEnergy - energy;

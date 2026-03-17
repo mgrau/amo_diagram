@@ -39,10 +39,11 @@ export function ensureMathJax(): Promise<void> {
     const tex = new TeX({ packages: AllPackages });
     const svgOut = new SVG({ fontCache: "none" });
     const doc = mathjax.document("", { InputJax: tex, OutputJax: svgOut });
+    type LiteNode = Parameters<typeof adaptor.childNodes>[0];
     _convert = (latex, options) => doc.convert(latex, options);
-    _childNodes = (node) => adaptor.childNodes(node as never);
-    _kind = (node) => adaptor.kind(node as never);
-    _outerHTML = (node) => adaptor.outerHTML(node as never);
+    _childNodes = (node) => adaptor.childNodes(node as LiteNode);
+    _kind = (node) => adaptor.kind(node as LiteNode);
+    _outerHTML = (node) => adaptor.outerHTML(node as LiteNode);
   })();
   return initPromise;
 }

@@ -25,9 +25,19 @@ export const semanticHighlightTheme = EditorView.theme({
   ".cm-hl-state-id":    { color: "#f5e0dc", fontStyle: "italic" },
 });
 
+function detectIndentUnit(doc: EditorView["state"]["doc"]): number {
+  for (let i = 1; i <= doc.lines; i++) {
+    const m = doc.line(i).text.match(/^( +)\S/);
+    if (m) return m[1].length;
+  }
+  return 2;
+}
+
 function buildDecorations(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   const doc = view.state.doc;
+  const indentUnit = detectIndentUnit(doc);
+  const stateIdRe = new RegExp(`^${" ".repeat(indentUnit)}\\S`);
   let section: SectionName | null = null;
 
   for (let i = 1; i <= doc.lines; i++) {
@@ -51,11 +61,11 @@ function buildDecorations(view: EditorView): DecorationSet {
 
     if (!section) continue;
 
-    // Under 'states': exactly 2-space indent = state identifier (not a property name)
-    if (section === "states" && /^  \S/.test(text)) {
-      const m = text.match(/^  (.+?)\s*:/);
+    // Under 'states': first indent level = state identifier (not a property name)
+    if (section === "states" && stateIdRe.test(text)) {
+      const m = text.match(/^( +)(.+?)\s*:/);
       if (m) {
-        builder.add(line.from + 2, line.from + 2 + m[1].trimEnd().length,
+        builder.add(line.from + m[1].length, line.from + m[1].length + m[2].trimEnd().length,
           Decoration.mark({ class: "cm-hl-state-id" }));
       }
       continue;

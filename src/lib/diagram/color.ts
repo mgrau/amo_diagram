@@ -1,42 +1,59 @@
+// Visible spectrum boundaries (nm)
+const WL_MIN = 380;
+const WL_MAX = 780;
+const WL_VIOLET_END = 440;
+const WL_BLUE_END = 490;
+const WL_CYAN_END = 510;
+const WL_YELLOW_END = 580;
+const WL_ORANGE_END = 645;
+
+// Intensity falloff near spectrum edges to avoid harsh cutoff
+const WL_FADE_LOW_END = 420;
+const WL_FADE_HIGH_START = 700;
+const INTENSITY_MIN = 0.3;
+const INTENSITY_RANGE = 0.7; // full intensity = INTENSITY_MIN + INTENSITY_RANGE
+
+const GAMMA = 0.8;
+const MAX_CHANNEL = 255;
+
 export function wavelengthToHex(wavelengthNm: number | undefined, fallback = "#5a6478"): string {
   if (wavelengthNm === undefined || Number.isNaN(wavelengthNm)) {
     return fallback;
   }
 
-  const wavelength = Math.max(380, Math.min(780, wavelengthNm));
+  const wavelength = Math.max(WL_MIN, Math.min(WL_MAX, wavelengthNm));
   let red = 0;
   let green = 0;
   let blue = 0;
 
-  if (wavelength < 440) {
-    red = -(wavelength - 440) / (440 - 380);
+  if (wavelength < WL_VIOLET_END) {
+    red = -(wavelength - WL_VIOLET_END) / (WL_VIOLET_END - WL_MIN);
     blue = 1;
-  } else if (wavelength < 490) {
-    green = (wavelength - 440) / (490 - 440);
+  } else if (wavelength < WL_BLUE_END) {
+    green = (wavelength - WL_VIOLET_END) / (WL_BLUE_END - WL_VIOLET_END);
     blue = 1;
-  } else if (wavelength < 510) {
+  } else if (wavelength < WL_CYAN_END) {
     green = 1;
-    blue = -(wavelength - 510) / (510 - 490);
-  } else if (wavelength < 580) {
-    red = (wavelength - 510) / (580 - 510);
+    blue = -(wavelength - WL_CYAN_END) / (WL_CYAN_END - WL_BLUE_END);
+  } else if (wavelength < WL_YELLOW_END) {
+    red = (wavelength - WL_CYAN_END) / (WL_YELLOW_END - WL_CYAN_END);
     green = 1;
-  } else if (wavelength < 645) {
+  } else if (wavelength < WL_ORANGE_END) {
     red = 1;
-    green = -(wavelength - 645) / (645 - 580);
+    green = -(wavelength - WL_ORANGE_END) / (WL_ORANGE_END - WL_YELLOW_END);
   } else {
     red = 1;
   }
 
   let factor = 1;
-  if (wavelength < 420) {
-    factor = 0.3 + 0.7 * (wavelength - 380) / (420 - 380);
-  } else if (wavelength > 700) {
-    factor = 0.3 + 0.7 * (780 - wavelength) / (780 - 700);
+  if (wavelength < WL_FADE_LOW_END) {
+    factor = INTENSITY_MIN + INTENSITY_RANGE * (wavelength - WL_MIN) / (WL_FADE_LOW_END - WL_MIN);
+  } else if (wavelength > WL_FADE_HIGH_START) {
+    factor = INTENSITY_MIN + INTENSITY_RANGE * (WL_MAX - wavelength) / (WL_MAX - WL_FADE_HIGH_START);
   }
 
   const channel = (value: number): string => {
-    const gamma = 0.8;
-    const scaled = value <= 0 ? 0 : Math.round(255 * Math.pow(value * factor, gamma));
+    const scaled = value <= 0 ? 0 : Math.round(MAX_CHANNEL * Math.pow(value * factor, GAMMA));
     return scaled.toString(16).padStart(2, "0");
   };
 
