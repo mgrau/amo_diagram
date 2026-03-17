@@ -1,0 +1,37 @@
+metadata:
+  name: Lu+
+  title: Lu+ Transitions
+
+states:
+  1S0:
+    energy: 0.0
+  3D1:
+    energy: 11796.24
+  3D2:
+    energy: 12435.32
+  1D1:
+    energy: 17332.58
+  3P1:
+    energy: 28502.40
+  3P0:
+    energy: 27503.16
+
+transitions:
+  - upper: 3P1
+    lower: 1S0
+    wavelength_nm: 350
+  - upper: 3P0
+    lower: 3D1
+    wavelength_nm: 646
+  - upper: 3P1
+    lower: 3D1
+    wavelength_nm: 622
+  - upper: 3D1
+    lower: 1S0
+    wavelength_nm: 848.0
+    label: 848 nm (M1)
+  - upper: 3P0
+    lower: 1S0
+    label: forbidden
+    wavy: true
+    color: "#7A7A7A"

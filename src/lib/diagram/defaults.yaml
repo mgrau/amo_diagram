@@ -1,0 +1,51 @@
+metadata:
+  ion_charge: 0
+  energy_unit: cm-1
+
+style:
+  theme: default
+  font_family: STIXGeneral
+  arrowhead: triangle
+  endpoint_clearance: 0.004
+  figure_width: 5.0
+  figure_height: 5.0
+  state_linewidth: 2.0
+  state_length: 0.75
+  state_font_size: 18.0
+  label_font_size: 13.0
+  title_font_size: 18.0
+  footer_font_size: 18.0
+  column_label_font_size: 12.0
+  transition_linewidth: 2.0
+  transition_font_size: 14.0
+  arrowsize: 16.0
+  show_energy_axis: false
+  show_energy_labels: false
+  show_column_labels: false
+
+defaults:
+  column:
+    column_order: 0
+    column_width: 1.0
+  state:
+    label_side: auto
+    label_va: center
+    label_offset_x: 0.0
+    label_offset_y: 0.0
+  transition:
+    linestyle: solid
+    show_wavelength: false
+    arrow: true
+    arrow_both_ends: true
+    wavy: false
+    label_offset_x: 0.0
+    label_offset_y: 0.0
+    label_rotation: 0.0
+    start_x_offset: 0.0
+    end_x_offset: 0.0
+    label_position: 0.5
+    position: auto
+    label_ha: center
+    label_va: center
+    label_fontstyle: normal
+    alignment: transition

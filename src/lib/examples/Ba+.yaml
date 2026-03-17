@@ -1,0 +1,32 @@
+metadata:
+  name: Ba
+  title: Ba+ Transitions
+
+states:
+  6S1/2:
+    energy: 0.0
+  6P1/2:
+    energy: 20261.6
+  6P3/2:
+    energy: 21952.4
+  5D3/2:
+    energy: 4873.9
+  5D5/2:
+    energy: 5674.8
+
+transitions:
+  - upper: 6P1/2
+    lower: 6S1/2
+    wavelength_nm: 493
+  - upper: 6P1/2
+    lower: 5D3/2
+    wavelength_nm: 650
+  - upper: 6P3/2
+    lower: 6S1/2
+    wavelength_nm: 455
+  - upper: 5D5/2
+    lower: 6S1/2
+    wavelength_nm: 1762
+  - upper: 6P3/2
+    lower: 5D5/2
+    wavelength_nm: 614

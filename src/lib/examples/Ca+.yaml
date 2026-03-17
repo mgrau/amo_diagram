@@ -1,0 +1,35 @@
+metadata:
+  name: Ca
+  title: Ca+ Transitions
+
+states:
+  4S1/2:
+    energy: 0.0
+  4P1/2:
+    energy: 25191.5
+  4P3/2:
+    energy: 25414.4
+  3D3/2:
+    energy: 13650.2
+  3D5/2:
+    energy: 13710.9
+
+transitions:
+  - upper: 4P1/2
+    lower: 4S1/2
+    wavelength_nm: 397
+  - upper: 4P3/2
+    lower: 4S1/2
+    wavelength_nm: 393
+  - upper: 4P1/2
+    lower: 3D3/2
+    wavelength_nm: 866
+  - upper: 4P3/2
+    lower: 3D3/2
+    wavelength_nm: 850
+  - upper: 4P3/2
+    lower: 3D5/2
+    wavelength_nm: 854
+  - upper: 3D5/2
+    lower: 4S1/2
+    wavelength_nm: 729

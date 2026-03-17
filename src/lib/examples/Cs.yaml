@@ -1,0 +1,28 @@
+metadata:
+  name: Cs
+  title: Cesium D Lines
+
+states:
+  6S1/2:
+    config: 6s
+    L: 0
+    J: 0.5
+    energy: 0.0
+  6P1/2:
+    config: 6p
+    L: 1
+    J: 0.5
+    energy: 11178.3
+  6P3/2:
+    config: 6p
+    L: 1
+    J: 1.5
+    energy: 11732.3
+
+transitions:
+  - upper: 6P1/2
+    lower: 6S1/2
+    wavelength_nm: 894.6
+  - upper: 6P3/2
+    lower: 6S1/2
+    wavelength_nm: 852.3
