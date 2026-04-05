@@ -245,7 +245,6 @@
       if (requestId !== latestRenderRequestId) {
         return;
       }
-      rendered = null;
       error = caught instanceof Error ? caught.message : "Unknown rendering error.";
     } finally {
       if (requestId === latestRenderRequestId) {
@@ -264,7 +263,6 @@
       error = "";
       return;
     }
-    rendered = null;
     error = message.error;
   }
 
@@ -576,7 +574,8 @@ transitions: []
             <div class="rounded border border-red-300 bg-red-50 p-4 text-sm text-red-600">
               {error}
             </div>
-          {:else if rendered}
+          {/if}
+          {#if rendered}
             <div class="flex min-h-full items-start justify-center">
               <div class="rounded-sm border border-gray-300 bg-white">
                 {@html rendered.svg}
