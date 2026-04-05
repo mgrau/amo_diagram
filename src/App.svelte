@@ -4,14 +4,13 @@
   import CodeEditor from "./lib/components/CodeEditor.svelte";
   import HelpModal from "./lib/components/HelpModal.svelte";
   import type { RenderedDiagram } from "./lib/diagram/render";
-  import { createPdfBlob, createPngBlob, createSvgBlob, downloadPdf, downloadPng, downloadSvg, extractYamlFromSvg } from "./lib/diagram/export";
+  import { createPdfBlob, createPngBlob, createSvgBlob, downloadPdf, downloadPng, downloadSvg, embedEditorLinkInSvg, extractYamlFromSvg } from "./lib/diagram/export";
   import type { RenderWorkerResponse } from "./lib/diagram/renderWorkerTypes";
   import { EXAMPLES, type ExampleDiagram } from "./lib/examples";
   import { buildSharedDiagramUrls, decodeSharedDiagramSource, parseSharedDiagramRequest, type SharedDiagramOutput } from "./lib/urlState";
 
-  type SharedDiagram = ExampleDiagram & { source: "shared" };
   type SavedDiagram = ExampleDiagram & { source: "local" };
-  type MenuDiagram = ExampleDiagram & { source: "example" | "local" | "shared" };
+  type MenuDiagram = ExampleDiagram & { source: "example" | "local" };
   type ShareLinks = Record<SharedDiagramOutput, string>;
 
   const LOCAL_STORAGE_KEY = "state-diagram-studio.local-diagrams";
@@ -139,7 +138,7 @@
       return;
     }
     if (format === "svg") {
-      downloadSvg(exportFilename("svg"), rendered.svg);
+      downloadSvg(exportFilename("svg"), await svgWithEmbeddedEditorLink(rendered.svg));
       return;
     }
     if (format === "png") {
@@ -174,17 +173,6 @@
       description: derived.description,
       yaml,
       source: "local"
-    };
-  }
-
-  function buildSharedDiagram(yaml: string): SharedDiagram {
-    const derived = deriveLocalDiagramMetadata(yaml, "Shared Diagram", "Loaded from a shared link");
-    return {
-      id: "shared-link",
-      name: derived.name,
-      description: derived.description || "Loaded from a shared link",
-      yaml,
-      source: "shared"
     };
   }
 
@@ -270,6 +258,23 @@
 
   function shareUrlFor(target: SharedDiagramOutput): string {
     return shareLinks?.[target] ?? "";
+  }
+
+  async function editorShareUrl(): Promise<string> {
+    if (shareLinks?.editor) {
+      return shareLinks.editor;
+    }
+    const urls = await buildSharedDiagramUrls(new URL(window.location.href), yamlText);
+    shareLinks = urls;
+    return urls.editor;
+  }
+
+  async function svgWithEmbeddedEditorLink(svgSource: string): Promise<string> {
+    try {
+      return embedEditorLinkInSvg(svgSource, await editorShareUrl());
+    } catch {
+      return svgSource;
+    }
   }
 
   function shareTargetAccent(target: SharedDiagramOutput): string {
@@ -404,10 +409,6 @@
   function setSelectedDiagram(diagram: MenuDiagram): void {
     selectedDiagram = diagram;
     if (!hasLocalStorage) return;
-    if (diagram.source === "shared") {
-      localStorage.removeItem(SELECTED_DIAGRAM_KEY);
-      return;
-    }
     localStorage.setItem(SELECTED_DIAGRAM_KEY, JSON.stringify({
       id: diagram.id,
       source: diagram.source
@@ -426,12 +427,10 @@
 
     void (async () => {
       try {
-        const loadedFromUrl = await restoreSharedDiagramFromUrl();
+        restoreLocalState();
+        await restoreSharedDiagramFromUrl();
         if (disposed) {
           return;
-        }
-        if (!loadedFromUrl) {
-          restoreLocalState();
         }
         if (!error) {
           schedulePreviewRender(yamlText, true);
@@ -514,10 +513,27 @@
       return false;
     }
     const source = await decodeSharedDiagramSource(encodedSource);
-    const shared = buildSharedDiagram(source);
-    selectedDiagram = shared;
+    if (output === "editor") {
+      const imported = buildLocalDiagram("Shared Diagram", "Imported from a shared link", source);
+      localDiagrams = [imported, ...localDiagrams];
+      persistLocalDiagrams();
+      setSelectedDiagram(imported);
+      yamlText = imported.yaml;
+      clearSharedDiagramUrl();
+      return true;
+    }
     yamlText = source;
     return true;
+  }
+
+  function clearSharedDiagramUrl(): void {
+    const current = new URL(window.location.href);
+    if (!current.searchParams.has("diagram") && !current.searchParams.has("output")) {
+      return;
+    }
+    current.searchParams.delete("diagram");
+    current.searchParams.delete("output");
+    window.history.replaceState({}, "", `${current.pathname}${current.search}${current.hash}`);
   }
 
   function parseYamlMetadata(yamlSource: string): Record<string, unknown> | undefined {
@@ -566,7 +582,7 @@ transitions: []
   async function openDirectOutput(svgSource: string): Promise<void> {
     let blob: Blob;
     if (outputMode === "svg") {
-      blob = createSvgBlob(svgSource);
+      blob = createSvgBlob(await svgWithEmbeddedEditorLink(svgSource));
     } else if (outputMode === "png") {
       blob = await createPngBlob(svgSource);
     } else if (outputMode === "pdf") {

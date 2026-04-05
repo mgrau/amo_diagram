@@ -51,6 +51,53 @@ export async function createPdfBlob(svgSource: string): Promise<Blob> {
   return createPdfBlobFromSvgElement(svgElement as unknown as SVGSVGElement);
 }
 
+export function embedEditorLinkInSvg(svgSource: string, editorUrl: string): string {
+  if (!editorUrl) {
+    return svgSource;
+  }
+  const parser = new DOMParser();
+  const document = parser.parseFromString(svgSource, "image/svg+xml");
+  const svgElement = document.querySelector("svg");
+  if (!(svgElement instanceof SVGElement)) {
+    return svgSource;
+  }
+
+  const svg = svgElement as unknown as SVGSVGElement;
+  const { width, height } = svgDimensions(svg);
+  const viewBox = svg.getAttribute("viewBox")?.trim().split(/\s+/).map(Number) ?? [0, 0, width, height];
+  const linkBounds = viewBox.length === 4 && viewBox.every((value) => Number.isFinite(value))
+    ? viewBox
+    : [0, 0, width, height];
+
+  const metadata = document.querySelector("metadata") ?? document.createElementNS("http://www.w3.org/2000/svg", "metadata");
+  if (!metadata.parentNode) {
+    svg.insertBefore(metadata, svg.firstChild);
+  }
+  const editorLinkNode = document.createElementNS("http://www.w3.org/2000/svg", "state-diagram-editor-link");
+  editorLinkNode.textContent = editorUrl;
+  metadata.appendChild(editorLinkNode);
+
+  const anchor = document.createElementNS("http://www.w3.org/2000/svg", "a");
+  anchor.setAttribute("href", editorUrl);
+  anchor.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", editorUrl);
+  anchor.setAttribute("target", "_blank");
+  anchor.setAttribute("rel", "noopener noreferrer");
+
+  const overlay = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  overlay.setAttribute("x", `${linkBounds[0]}`);
+  overlay.setAttribute("y", `${linkBounds[1]}`);
+  overlay.setAttribute("width", `${linkBounds[2]}`);
+  overlay.setAttribute("height", `${linkBounds[3]}`);
+  overlay.setAttribute("fill", "#ffffff");
+  overlay.setAttribute("fill-opacity", "0.001");
+  overlay.setAttribute("pointer-events", "all");
+
+  anchor.appendChild(overlay);
+  svg.appendChild(anchor);
+
+  return new XMLSerializer().serializeToString(document);
+}
+
 async function createPdfBlobFromSvgElement(svgElement: SVGSVGElement): Promise<Blob> {
   const { width, height } = svgDimensions(svgElement);
   const orientation = width >= height ? "landscape" : "portrait";
