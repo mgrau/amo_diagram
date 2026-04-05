@@ -621,7 +621,7 @@ transitions: []
         <span class="mt-1 block h-0.5 w-5 bg-current"></span>
         <span class="mt-1 block h-0.5 w-5 bg-current"></span>
       </button>
-      <div class="text-lg font-bold tracking-wide">State Diagram Studio</div>
+      <div class="text-lg font-bold tracking-wide">AMO Diagram Studio</div>
     </div>
   </header>
 
@@ -639,7 +639,7 @@ transitions: []
 
     <aside class={`panel drawer-shadow absolute left-0 top-0 z-30 flex h-full w-[17rem] flex-col border-r border-gray-200 p-4 transition-transform duration-200 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
       <div class="mb-5">
-        <h1 class="text-xl font-bold text-gray-800">State Diagram</h1>
+        <h1 class="text-xl font-bold text-gray-800">AMO Diagram Studio</h1>
       </div>
 
       <input
