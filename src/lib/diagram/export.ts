@@ -2,12 +2,23 @@ import { jsPDF } from "jspdf";
 import { svg2pdf } from "svg2pdf.js";
 
 export function downloadSvg(filename: string, svg: string): void {
-  downloadBlob(filename, new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+  downloadBlob(filename, createSvgBlob(svg));
 }
 
 export async function downloadPng(filename: string, svg: string): Promise<void> {
-  const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
+  downloadBlob(filename, await createPngBlob(svg));
+}
+
+export async function downloadPdf(filename: string, svgElement: SVGSVGElement): Promise<void> {
+  downloadBlob(filename, await createPdfBlobFromSvgElement(svgElement));
+}
+
+export function createSvgBlob(svg: string): Blob {
+  return new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+}
+
+export async function createPngBlob(svg: string): Promise<Blob> {
+  const url = URL.createObjectURL(createSvgBlob(svg));
   try {
     const image = await loadImage(url);
     const canvas = document.createElement("canvas");
@@ -24,15 +35,24 @@ export async function downloadPng(filename: string, svg: string): Promise<void> 
     if (!pngBlob) {
       throw new Error("Failed to create PNG.");
     }
-    downloadBlob(filename, pngBlob);
+    return pngBlob;
   } finally {
     URL.revokeObjectURL(url);
   }
 }
 
-export async function downloadPdf(filename: string, svgElement: SVGSVGElement): Promise<void> {
-  const width = Number(svgElement.getAttribute("width")) || svgElement.viewBox.baseVal.width || 800;
-  const height = Number(svgElement.getAttribute("height")) || svgElement.viewBox.baseVal.height || 600;
+export async function createPdfBlob(svgSource: string): Promise<Blob> {
+  const parser = new DOMParser();
+  const document = parser.parseFromString(svgSource, "image/svg+xml");
+  const svgElement = document.querySelector("svg");
+  if (!(svgElement instanceof SVGElement)) {
+    throw new Error("Unable to parse SVG for PDF export.");
+  }
+  return createPdfBlobFromSvgElement(svgElement as unknown as SVGSVGElement);
+}
+
+async function createPdfBlobFromSvgElement(svgElement: SVGSVGElement): Promise<Blob> {
+  const { width, height } = svgDimensions(svgElement);
   const orientation = width >= height ? "landscape" : "portrait";
   const pdf = new jsPDF({
     orientation,
@@ -40,7 +60,7 @@ export async function downloadPdf(filename: string, svgElement: SVGSVGElement): 
     format: [width, height]
   });
   await svg2pdf(svgElement, pdf, { x: 0, y: 0, width, height });
-  pdf.save(filename);
+  return pdf.output("blob");
 }
 
 export function extractYamlFromSvg(svgSource: string): string | null {
@@ -63,6 +83,19 @@ function downloadBlob(filename: string, blob: Blob): void {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function svgDimensions(svgElement: SVGSVGElement): { width: number; height: number } {
+  const widthAttr = Number(svgElement.getAttribute("width"));
+  const heightAttr = Number(svgElement.getAttribute("height"));
+  if (Number.isFinite(widthAttr) && Number.isFinite(heightAttr) && widthAttr > 0 && heightAttr > 0) {
+    return { width: widthAttr, height: heightAttr };
+  }
+  const viewBox = svgElement.getAttribute("viewBox")?.trim().split(/\s+/).map(Number) ?? [];
+  if (viewBox.length === 4 && viewBox.every((value) => Number.isFinite(value))) {
+    return { width: viewBox[2], height: viewBox[3] };
+  }
+  return { width: 800, height: 600 };
 }
 
 function loadImage(url: string): Promise<HTMLImageElement> {

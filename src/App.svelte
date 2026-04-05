@@ -4,12 +4,15 @@
   import CodeEditor from "./lib/components/CodeEditor.svelte";
   import HelpModal from "./lib/components/HelpModal.svelte";
   import type { RenderedDiagram } from "./lib/diagram/render";
-  import { downloadPdf, downloadPng, downloadSvg, extractYamlFromSvg } from "./lib/diagram/export";
+  import { createPdfBlob, createPngBlob, createSvgBlob, downloadPdf, downloadPng, downloadSvg, extractYamlFromSvg } from "./lib/diagram/export";
   import type { RenderWorkerResponse } from "./lib/diagram/renderWorkerTypes";
   import { EXAMPLES, type ExampleDiagram } from "./lib/examples";
+  import { buildSharedDiagramUrls, decodeSharedDiagramSource, parseSharedDiagramRequest, type SharedDiagramOutput } from "./lib/urlState";
 
+  type SharedDiagram = ExampleDiagram & { source: "shared" };
   type SavedDiagram = ExampleDiagram & { source: "local" };
-  type MenuDiagram = ExampleDiagram & { source: "example" | "local" };
+  type MenuDiagram = ExampleDiagram & { source: "example" | "local" | "shared" };
+  type ShareLinks = Record<SharedDiagramOutput, string>;
 
   const LOCAL_STORAGE_KEY = "state-diagram-studio.local-diagrams";
   const SELECTED_DIAGRAM_KEY = "state-diagram-studio.selected-diagram";
@@ -22,16 +25,34 @@
   let fileInput: HTMLInputElement;
   let menuOpen = false;
   let exportOpen = false;
+  let shareOpen = false;
   let helpOpen = false;
   let isRendering = false;
   let renderWorker: Worker | null = null;
   let pendingRenderTimer: ReturnType<typeof setTimeout> | undefined;
   let pendingLocalSyncTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingShareMessageTimer: ReturnType<typeof setTimeout> | undefined;
   let pendingLocalSyncSource: string | null = null;
   let latestRenderRequestId = 0;
+  let latestShareRequestId = 0;
+  let shareLinks: ShareLinks | null = null;
+  let shareLinksError = "";
+  let shareLinksLoading = false;
+  let shareMessage = "";
+  let outputMode: SharedDiagramOutput = "editor";
+  let directOutputStarted = false;
+  const SHARE_TARGETS: Array<{ id: SharedDiagramOutput; label: string }> = [
+    { id: "editor", label: "Editor" },
+    { id: "svg", label: "SVG" },
+    { id: "png", label: "PNG" },
+    { id: "pdf", label: "PDF" }
+  ];
 
   function handleSourceChange(source: string, immediateRender = false): void {
     yamlText = source;
+    shareOpen = false;
+    exportOpen = false;
+    resetShareState();
     syncSelectedYamlSource(source);
     scheduleLocalDiagramSync(source);
     schedulePreviewRender(source, immediateRender);
@@ -39,6 +60,7 @@
 
   function loadExample(exampleId: string): void {
     flushPendingLocalDiagramSync();
+    shareOpen = false;
     const next = EXAMPLES.find((example) => example.id === exampleId);
     if (!next) return;
     setSelectedDiagram({ ...next, source: "example" });
@@ -47,6 +69,7 @@
 
   function loadSavedDiagram(diagramId: string): void {
     flushPendingLocalDiagramSync();
+    shareOpen = false;
     const next = localDiagrams.find((diagram) => diagram.id === diagramId);
     if (!next) return;
     setSelectedDiagram(next);
@@ -55,6 +78,7 @@
 
   function createNewDiagram(): void {
     flushPendingLocalDiagramSync();
+    shareOpen = false;
     const name = `Untitled ${localDiagrams.length + 1}`;
     const next = buildLocalDiagram(name, "New local diagram", emptyDiagramTemplate(name));
     localDiagrams = [next, ...localDiagrams];
@@ -75,6 +99,7 @@
 
   async function handleFileSelection(event: Event): Promise<void> {
     flushPendingLocalDiagramSync();
+    shareOpen = false;
     const input = event.currentTarget as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) {
@@ -109,6 +134,7 @@
 
   async function handleExport(format: "svg" | "png" | "pdf"): Promise<void> {
     exportOpen = false;
+    shareOpen = false;
     if (!rendered) {
       return;
     }
@@ -149,6 +175,108 @@
       yaml,
       source: "local"
     };
+  }
+
+  function buildSharedDiagram(yaml: string): SharedDiagram {
+    const derived = deriveLocalDiagramMetadata(yaml, "Shared Diagram", "Loaded from a shared link");
+    return {
+      id: "shared-link",
+      name: derived.name,
+      description: derived.description || "Loaded from a shared link",
+      yaml,
+      source: "shared"
+    };
+  }
+
+  function resetShareState(): void {
+    shareLinks = null;
+    shareLinksError = "";
+    shareMessage = "";
+    if (pendingShareMessageTimer !== undefined) {
+      clearTimeout(pendingShareMessageTimer);
+      pendingShareMessageTimer = undefined;
+    }
+  }
+
+  async function toggleShareMenu(): Promise<void> {
+    exportOpen = false;
+    if (shareOpen) {
+      shareOpen = false;
+      return;
+    }
+    shareOpen = true;
+    await generateShareLinks();
+  }
+
+  async function generateShareLinks(): Promise<void> {
+    shareLinksLoading = true;
+    shareLinksError = "";
+    const requestId = ++latestShareRequestId;
+    try {
+      shareLinks = await buildSharedDiagramUrls(new URL(window.location.href), yamlText);
+      if (requestId !== latestShareRequestId) {
+        return;
+      }
+    } catch (caught) {
+      if (requestId !== latestShareRequestId) {
+        return;
+      }
+      shareLinks = null;
+      shareLinksError = caught instanceof Error ? caught.message : "Unable to generate share links.";
+    } finally {
+      if (requestId === latestShareRequestId) {
+        shareLinksLoading = false;
+      }
+    }
+  }
+
+  async function copyShareLink(target: SharedDiagramOutput): Promise<void> {
+    if (!shareLinks) {
+      return;
+    }
+    try {
+      await writeClipboardText(shareLinks[target]);
+      shareMessage = `${target.toUpperCase()} link copied.`;
+    } catch (caught) {
+      shareMessage = caught instanceof Error ? caught.message : "Unable to copy link.";
+    }
+    if (pendingShareMessageTimer !== undefined) {
+      clearTimeout(pendingShareMessageTimer);
+    }
+    pendingShareMessageTimer = window.setTimeout(() => {
+      shareMessage = "";
+      pendingShareMessageTimer = undefined;
+    }, 1800);
+  }
+
+  async function writeClipboardText(text: string): Promise<void> {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      document.execCommand("copy");
+    } finally {
+      document.body.removeChild(textarea);
+    }
+  }
+
+  function shareUrlFor(target: SharedDiagramOutput): string {
+    return shareLinks?.[target] ?? "";
+  }
+
+  function shareTargetAccent(target: SharedDiagramOutput): string {
+    if (target === "editor") return "border-sky-200 bg-sky-50 text-sky-700";
+    if (target === "svg") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    if (target === "png") return "border-amber-200 bg-amber-50 text-amber-700";
+    return "border-rose-200 bg-rose-50 text-rose-700";
   }
 
   function syncSelectedYamlSource(source: string): void {
@@ -276,6 +404,10 @@
   function setSelectedDiagram(diagram: MenuDiagram): void {
     selectedDiagram = diagram;
     if (!hasLocalStorage) return;
+    if (diagram.source === "shared") {
+      localStorage.removeItem(SELECTED_DIAGRAM_KEY);
+      return;
+    }
     localStorage.setItem(SELECTED_DIAGRAM_KEY, JSON.stringify({
       id: diagram.id,
       source: diagram.source
@@ -283,6 +415,8 @@
   }
 
   onMount(() => {
+    let disposed = false;
+
     try {
       renderWorker = new Worker(new URL("./lib/diagram/renderWorker.ts", import.meta.url), { type: "module" });
       renderWorker.onmessage = (event: MessageEvent<RenderWorkerResponse>) => handleWorkerMessage(event.data);
@@ -290,59 +424,101 @@
       renderWorker = null;
     }
 
-    if (hasLocalStorage) {
+    void (async () => {
       try {
-        const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            localDiagrams = parsed.filter((item): item is SavedDiagram =>
-              Boolean(item) &&
-              typeof item === "object" &&
-              typeof item.id === "string" &&
-              typeof item.name === "string" &&
-              typeof item.description === "string" &&
-              typeof item.yaml === "string"
-            ).map((item) => ({ ...item, source: "local" }));
-          }
+        const loadedFromUrl = await restoreSharedDiagramFromUrl();
+        if (disposed) {
+          return;
         }
-      } catch {
-        localDiagrams = [];
-      }
-
-      try {
-        const rawSelection = localStorage.getItem(SELECTED_DIAGRAM_KEY);
-        if (rawSelection) {
-          const parsedSelection = JSON.parse(rawSelection) as { id?: string; source?: "example" | "local" };
-          if (parsedSelection.source === "local" && typeof parsedSelection.id === "string") {
-            const restored = localDiagrams.find((diagram) => diagram.id === parsedSelection.id);
-            if (restored) {
-              selectedDiagram = restored;
-              yamlText = restored.yaml;
-            }
-          } else if (parsedSelection.source === "example" && typeof parsedSelection.id === "string") {
-            const restored = EXAMPLES.find((diagram) => diagram.id === parsedSelection.id);
-            if (restored) {
-              selectedDiagram = { ...restored, source: "example" };
-              yamlText = restored.yaml;
-            }
-          }
+        if (!loadedFromUrl) {
+          restoreLocalState();
         }
-      } catch {
-        // Fall back to the default example selection already set above.
+        if (!error) {
+          schedulePreviewRender(yamlText, true);
+        }
+      } catch (caught) {
+        if (disposed) {
+          return;
+        }
+        error = caught instanceof Error ? caught.message : "Unable to load diagram from URL.";
       }
-    }
-
-    schedulePreviewRender(yamlText, true);
+    })();
 
     return () => {
+      disposed = true;
       flushPendingLocalDiagramSync();
       if (pendingRenderTimer !== undefined) {
         clearTimeout(pendingRenderTimer);
       }
+      if (pendingShareMessageTimer !== undefined) {
+        clearTimeout(pendingShareMessageTimer);
+      }
       renderWorker?.terminate();
     };
   });
+
+  function restoreLocalState(): void {
+    if (!hasLocalStorage) {
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          localDiagrams = parsed.filter((item): item is SavedDiagram =>
+            Boolean(item) &&
+            typeof item === "object" &&
+            typeof item.id === "string" &&
+            typeof item.name === "string" &&
+            typeof item.description === "string" &&
+            typeof item.yaml === "string"
+          ).map((item) => ({ ...item, source: "local" }));
+        }
+      }
+    } catch {
+      localDiagrams = [];
+    }
+
+    try {
+      const rawSelection = localStorage.getItem(SELECTED_DIAGRAM_KEY);
+      if (rawSelection) {
+        const parsedSelection = JSON.parse(rawSelection) as { id?: string; source?: "example" | "local" };
+        if (parsedSelection.source === "local" && typeof parsedSelection.id === "string") {
+          const restored = localDiagrams.find((diagram) => diagram.id === parsedSelection.id);
+          if (restored) {
+            selectedDiagram = restored;
+            yamlText = restored.yaml;
+          }
+        } else if (parsedSelection.source === "example" && typeof parsedSelection.id === "string") {
+          const restored = EXAMPLES.find((diagram) => diagram.id === parsedSelection.id);
+          if (restored) {
+            selectedDiagram = { ...restored, source: "example" };
+            yamlText = restored.yaml;
+          }
+        }
+      }
+    } catch {
+      // Fall back to the default example selection already set above.
+    }
+  }
+
+  async function restoreSharedDiagramFromUrl(): Promise<boolean> {
+    const { encodedSource, output } = parseSharedDiagramRequest(new URL(window.location.href));
+    outputMode = output;
+    if (!encodedSource) {
+      if (output !== "editor") {
+        error = "Missing shared diagram source in the URL.";
+        return true;
+      }
+      return false;
+    }
+    const source = await decodeSharedDiagramSource(encodedSource);
+    const shared = buildSharedDiagram(source);
+    selectedDiagram = shared;
+    yamlText = source;
+    return true;
+  }
 
   function parseYamlMetadata(yamlSource: string): Record<string, unknown> | undefined {
     try {
@@ -387,8 +563,52 @@ transitions: []
 `;
   }
 
+  async function openDirectOutput(svgSource: string): Promise<void> {
+    let blob: Blob;
+    if (outputMode === "svg") {
+      blob = createSvgBlob(svgSource);
+    } else if (outputMode === "png") {
+      blob = await createPngBlob(svgSource);
+    } else if (outputMode === "pdf") {
+      blob = await createPdfBlob(svgSource);
+    } else {
+      return;
+    }
+    window.location.replace(URL.createObjectURL(blob));
+  }
+
+  $: if (rendered && outputMode !== "editor" && !directOutputStarted && !error) {
+    directOutputStarted = true;
+    void openDirectOutput(rendered.svg).catch((caught) => {
+      error = caught instanceof Error ? caught.message : "Unable to generate requested output.";
+      directOutputStarted = false;
+    });
+  }
+
 </script>
 
+{#if outputMode !== "editor"}
+  <div class="flex h-screen items-center justify-center bg-gray-50 p-6">
+    <div class="panel w-full max-w-xl rounded-lg p-6 text-center">
+      <div class="text-xs font-semibold uppercase tracking-wide text-[#0067B1]">
+        Direct {outputMode.toUpperCase()} Link
+      </div>
+      {#if error}
+        <div class="mt-4 rounded border border-red-300 bg-red-50 p-4 text-sm text-red-600">
+          {error}
+        </div>
+      {:else}
+        <div class="mt-4 text-sm text-gray-700">
+          {#if isRendering || !directOutputStarted}
+            Rendering shared diagram…
+          {:else}
+            Opening generated {outputMode.toUpperCase()}…
+          {/if}
+        </div>
+      {/if}
+    </div>
+  </div>
+{:else}
 <div class="flex h-screen flex-col bg-gray-50">
   <header class="flex items-center justify-between bg-[#003057] px-4 py-3 text-white shadow">
     <div class="flex items-center gap-3">
@@ -544,28 +764,126 @@ transitions: []
                 <div class="text-xs font-medium uppercase tracking-wide text-[#0067B1]">Rendering…</div>
               {/if}
             </div>
-            <div class="relative">
-              <div class="inline-flex overflow-hidden rounded border border-[#0067B1] shadow-sm">
+            <div class="flex items-center gap-2">
+              <div class="relative">
                 <button
-                  class="whitespace-nowrap bg-[#0067B1] px-3 py-2 text-sm font-medium text-white hover:bg-[#00558f]"
-                  on:click={() => handleExport("svg")}
+                  class="inline-flex items-center gap-2 rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:border-gray-400 hover:bg-gray-50"
+                  on:click={() => void toggleShareMenu()}
                 >
-                  Export SVG
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l1.92-1.92a5 5 0 0 0-7.07-7.07L11.3 5.63" />
+                    <path d="M14 11a5 5 0 0 0-7.54-.54L4.54 12.4a5 5 0 0 0 7.07 7.07l1.09-1.09" />
+                  </svg>
+                  Share
                 </button>
-                <button
-                  class="border-l border-blue-300 bg-[#0067B1] px-2 py-2 text-sm font-medium text-white hover:bg-[#00558f]"
-                  aria-label="Open export options"
-                  on:click={() => (exportOpen = !exportOpen)}
-                >
-                  ▾
-                </button>
+                {#if shareOpen}
+                  <div class="absolute right-0 top-12 z-10 w-[28rem] rounded border border-gray-200 bg-white p-3 shadow-lg">
+                    <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Share Links</div>
+                    <div class="mt-1 text-xs text-gray-600">
+                      Generated from the current editor contents.
+                    </div>
+                    {#if shareLinksLoading}
+                      <div class="mt-3 rounded border border-blue-200 bg-blue-50 p-3 text-sm text-[#003057]">
+                        Generating links…
+                      </div>
+                    {:else if shareLinksError}
+                      <div class="mt-3 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-600">
+                        {shareLinksError}
+                      </div>
+                    {:else if shareLinks}
+                      <div class="mt-3 space-y-3">
+                        {#each SHARE_TARGETS as target}
+                          <div class="rounded border border-gray-200 p-3">
+                            <div class="flex items-center gap-2">
+                              <div class={`inline-flex h-7 w-7 items-center justify-center rounded border ${shareTargetAccent(target.id)}`}>
+                                {#if target.id === "editor"}
+                                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 20h9" />
+                                    <path d="M16.5 3.5a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4Z" />
+                                  </svg>
+                                {:else if target.id === "svg"}
+                                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                    <path d="M14 2v6h6" />
+                                    <path d="M8 13h8" />
+                                    <path d="M8 17h5" />
+                                  </svg>
+                                {:else if target.id === "png"}
+                                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                                    <circle cx="8.5" cy="8.5" r="1.5" />
+                                    <path d="m21 15-5-5L5 21" />
+                                  </svg>
+                                {:else}
+                                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 17v-6" />
+                                    <path d="M9 14h6" />
+                                    <path d="M6 2h9l5 5v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" />
+                                    <path d="M14 2v6h6" />
+                                  </svg>
+                                {/if}
+                              </div>
+                              <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">{target.label}</div>
+                            </div>
+                            <div
+                              class="mt-2 truncate rounded bg-gray-50 px-2 py-2 font-mono text-[11px] text-gray-600"
+                              title={shareUrlFor(target.id)}
+                            >
+                              {shareUrlFor(target.id)}
+                            </div>
+                            <div class="mt-2 flex items-center gap-2">
+                              <a
+                                class="rounded border border-[#0067B1] px-2.5 py-1.5 text-xs font-medium text-[#0067B1] hover:bg-blue-50"
+                                href={shareUrlFor(target.id)}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Open
+                              </a>
+                              <button
+                                class="rounded border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                                on:click={() => void copyShareLink(target.id)}
+                              >
+                                Copy
+                              </button>
+                            </div>
+                          </div>
+                        {/each}
+                      </div>
+                    {/if}
+                    {#if shareMessage}
+                      <div class="mt-3 text-xs font-medium text-[#0067B1]">{shareMessage}</div>
+                    {/if}
+                  </div>
+                {/if}
               </div>
-              {#if exportOpen}
-                <div class="absolute right-0 top-12 z-10 min-w-40 rounded border border-gray-200 bg-white p-1 shadow-lg">
-                  <button class="block w-full rounded px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50" on:click={() => handleExport("png")}>Export PNG</button>
-                  <button class="block w-full rounded px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50" on:click={() => handleExport("pdf")}>Export PDF</button>
+
+              <div class="relative">
+                <div class="inline-flex overflow-hidden rounded border border-[#0067B1] shadow-sm">
+                  <button
+                    class="whitespace-nowrap bg-[#0067B1] px-3 py-2 text-sm font-medium text-white hover:bg-[#00558f]"
+                    on:click={() => handleExport("svg")}
+                  >
+                    Export SVG
+                  </button>
+                  <button
+                    class="border-l border-blue-300 bg-[#0067B1] px-2 py-2 text-sm font-medium text-white hover:bg-[#00558f]"
+                    aria-label="Open export options"
+                    on:click={() => {
+                      shareOpen = false;
+                      exportOpen = !exportOpen;
+                    }}
+                  >
+                    ▾
+                  </button>
                 </div>
-              {/if}
+                {#if exportOpen}
+                  <div class="absolute right-0 top-12 z-10 min-w-40 rounded border border-gray-200 bg-white p-1 shadow-lg">
+                    <button class="block w-full rounded px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50" on:click={() => handleExport("png")}>Export PNG</button>
+                    <button class="block w-full rounded px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50" on:click={() => handleExport("pdf")}>Export PDF</button>
+                  </div>
+                {/if}
+              </div>
             </div>
           </div>
         </div>
@@ -591,3 +909,4 @@ transitions: []
     </div>
   </div>
 </div>
+{/if}
