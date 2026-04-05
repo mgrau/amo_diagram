@@ -5,6 +5,9 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   base: "./",
   plugins: [tailwindcss(), svelte()],
+  worker: {
+    format: "es"
+  },
   define: {
     PACKAGE_VERSION: JSON.stringify("3.2.1")
   },

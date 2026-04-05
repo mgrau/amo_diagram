@@ -8,6 +8,7 @@ Recent additions include:
 - `arrows: single|double|none` transition controls
 - global `style.font_size` plus local `font_size` overrides on states and transitions
 - Zeeman sublevel expansion from a compact state definition
+- asynchronous preview rendering via a web worker
 
 ## Stack
 

@@ -3,9 +3,9 @@
   import YAML from "yaml";
   import CodeEditor from "./lib/components/CodeEditor.svelte";
   import HelpModal from "./lib/components/HelpModal.svelte";
-  import { renderDiagram, type RenderedDiagram } from "./lib/diagram/render";
-  import { ensureMathJax } from "./lib/diagram/mathjax";
+  import type { RenderedDiagram } from "./lib/diagram/render";
   import { downloadPdf, downloadPng, downloadSvg, extractYamlFromSvg } from "./lib/diagram/export";
+  import type { RenderWorkerResponse } from "./lib/diagram/renderWorkerTypes";
   import { EXAMPLES, type ExampleDiagram } from "./lib/examples";
 
   type SavedDiagram = ExampleDiagram & { source: "local" };
@@ -23,40 +23,44 @@
   let menuOpen = false;
   let exportOpen = false;
   let helpOpen = false;
+  let isRendering = false;
+  let renderWorker: Worker | null = null;
+  let pendingRenderTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingLocalSyncTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingLocalSyncSource: string | null = null;
+  let latestRenderRequestId = 0;
 
-  function rerender(source: string): void {
+  function handleSourceChange(source: string, immediateRender = false): void {
     yamlText = source;
-    syncSelectedYaml(source);
-    try {
-      rendered = renderDiagram(source);
-      error = "";
-    } catch (caught) {
-      rendered = null;
-      error = caught instanceof Error ? caught.message : "Unknown rendering error.";
-    }
+    syncSelectedYamlSource(source);
+    scheduleLocalDiagramSync(source);
+    schedulePreviewRender(source, immediateRender);
   }
 
   function loadExample(exampleId: string): void {
+    flushPendingLocalDiagramSync();
     const next = EXAMPLES.find((example) => example.id === exampleId);
     if (!next) return;
     setSelectedDiagram({ ...next, source: "example" });
-    rerender(next.yaml);
+    handleSourceChange(next.yaml, true);
   }
 
   function loadSavedDiagram(diagramId: string): void {
+    flushPendingLocalDiagramSync();
     const next = localDiagrams.find((diagram) => diagram.id === diagramId);
     if (!next) return;
     setSelectedDiagram(next);
-    rerender(next.yaml);
+    handleSourceChange(next.yaml, true);
   }
 
   function createNewDiagram(): void {
+    flushPendingLocalDiagramSync();
     const name = `Untitled ${localDiagrams.length + 1}`;
     const next = buildLocalDiagram(name, "New local diagram", emptyDiagramTemplate(name));
     localDiagrams = [next, ...localDiagrams];
     persistLocalDiagrams();
     setSelectedDiagram(next);
-    rerender(next.yaml);
+    handleSourceChange(next.yaml, true);
   }
 
   function deleteSavedDiagram(diagramId: string): void {
@@ -70,6 +74,7 @@
   }
 
   async function handleFileSelection(event: Event): Promise<void> {
+    flushPendingLocalDiagramSync();
     const input = event.currentTarget as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) {
@@ -89,7 +94,7 @@
       localDiagrams = [created, ...localDiagrams];
       persistLocalDiagrams();
       setSelectedDiagram(created);
-      rerender(created.yaml);
+      handleSourceChange(created.yaml, true);
     } catch (caught) {
       error = caught instanceof Error ? caught.message : "Unable to load file.";
     } finally {
@@ -146,10 +151,48 @@
     };
   }
 
-  function syncSelectedYaml(source: string): void {
+  function syncSelectedYamlSource(source: string): void {
     if (selectedDiagram.source !== "local") {
       return;
     }
+    const updated: SavedDiagram = {
+      ...selectedDiagram,
+      source: "local",
+      yaml: source
+    };
+    selectedDiagram = updated;
+    localDiagrams = localDiagrams.map((diagram) => diagram.id === updated.id ? updated : diagram);
+  }
+
+  function scheduleLocalDiagramSync(source: string): void {
+    if (selectedDiagram.source !== "local") {
+      pendingLocalSyncSource = null;
+      if (pendingLocalSyncTimer !== undefined) {
+        clearTimeout(pendingLocalSyncTimer);
+        pendingLocalSyncTimer = undefined;
+      }
+      return;
+    }
+    pendingLocalSyncSource = source;
+    if (pendingLocalSyncTimer !== undefined) {
+      clearTimeout(pendingLocalSyncTimer);
+    }
+    pendingLocalSyncTimer = window.setTimeout(() => {
+      flushPendingLocalDiagramSync();
+    }, 250);
+  }
+
+  function flushPendingLocalDiagramSync(): void {
+    if (pendingLocalSyncTimer !== undefined) {
+      clearTimeout(pendingLocalSyncTimer);
+      pendingLocalSyncTimer = undefined;
+    }
+    if (!pendingLocalSyncSource || selectedDiagram.source !== "local") {
+      pendingLocalSyncSource = null;
+      return;
+    }
+    const source = pendingLocalSyncSource;
+    pendingLocalSyncSource = null;
     const derived = deriveLocalDiagramMetadata(source, selectedDiagram.name, selectedDiagram.description);
     const updated: SavedDiagram = {
       ...selectedDiagram,
@@ -158,9 +201,71 @@
       description: derived.description,
       yaml: source
     };
-    setSelectedDiagram(updated);
+    selectedDiagram = updated;
     localDiagrams = localDiagrams.map((diagram) => diagram.id === updated.id ? updated : diagram);
     persistLocalDiagrams();
+  }
+
+  function schedulePreviewRender(source: string, immediate = false): void {
+    if (pendingRenderTimer !== undefined) {
+      clearTimeout(pendingRenderTimer);
+      pendingRenderTimer = undefined;
+    }
+    error = "";
+    const dispatch = () => {
+      const requestId = ++latestRenderRequestId;
+      isRendering = true;
+      if (renderWorker) {
+        renderWorker.postMessage({ id: requestId, source });
+        return;
+      }
+      void renderPreviewFallback(source, requestId);
+    };
+    if (immediate) {
+      dispatch();
+      return;
+    }
+    pendingRenderTimer = window.setTimeout(dispatch, 90);
+  }
+
+  async function renderPreviewFallback(source: string, requestId: number): Promise<void> {
+    try {
+      const [{ ensureMathJax }, { renderDiagram }] = await Promise.all([
+        import("./lib/diagram/mathjax"),
+        import("./lib/diagram/render")
+      ]);
+      await ensureMathJax();
+      const next = renderDiagram(source);
+      if (requestId !== latestRenderRequestId) {
+        return;
+      }
+      rendered = next;
+      error = "";
+    } catch (caught) {
+      if (requestId !== latestRenderRequestId) {
+        return;
+      }
+      rendered = null;
+      error = caught instanceof Error ? caught.message : "Unknown rendering error.";
+    } finally {
+      if (requestId === latestRenderRequestId) {
+        isRendering = false;
+      }
+    }
+  }
+
+  function handleWorkerMessage(message: RenderWorkerResponse): void {
+    if (message.id !== latestRenderRequestId) {
+      return;
+    }
+    isRendering = false;
+    if (message.type === "success") {
+      rendered = message.rendered;
+      error = "";
+      return;
+    }
+    rendered = null;
+    error = message.error;
   }
 
   const hasLocalStorage = typeof localStorage !== "undefined";
@@ -180,55 +285,65 @@
   }
 
   onMount(() => {
-    if (!hasLocalStorage) return;
     try {
-      const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (!raw) {
-        return;
-      }
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) {
-        return;
-      }
-      localDiagrams = parsed.filter((item): item is SavedDiagram =>
-        Boolean(item) &&
-        typeof item === "object" &&
-        typeof item.id === "string" &&
-        typeof item.name === "string" &&
-        typeof item.description === "string" &&
-        typeof item.yaml === "string"
-      ).map((item) => ({ ...item, source: "local" }));
+      renderWorker = new Worker(new URL("./lib/diagram/renderWorker.ts", import.meta.url), { type: "module" });
+      renderWorker.onmessage = (event: MessageEvent<RenderWorkerResponse>) => handleWorkerMessage(event.data);
     } catch {
-      localDiagrams = [];
+      renderWorker = null;
     }
 
-    try {
-      const rawSelection = localStorage.getItem(SELECTED_DIAGRAM_KEY);
-      if (!rawSelection) {
-        return;
-      }
-      const parsedSelection = JSON.parse(rawSelection) as { id?: string; source?: "example" | "local" };
-      if (parsedSelection.source === "local" && typeof parsedSelection.id === "string") {
-        const restored = localDiagrams.find((diagram) => diagram.id === parsedSelection.id);
-        if (restored) {
-          setSelectedDiagram(restored);
-          rerender(restored.yaml);
-          return;
+    if (hasLocalStorage) {
+      try {
+        const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            localDiagrams = parsed.filter((item): item is SavedDiagram =>
+              Boolean(item) &&
+              typeof item === "object" &&
+              typeof item.id === "string" &&
+              typeof item.name === "string" &&
+              typeof item.description === "string" &&
+              typeof item.yaml === "string"
+            ).map((item) => ({ ...item, source: "local" }));
+          }
         }
+      } catch {
+        localDiagrams = [];
       }
-      if (parsedSelection.source === "example" && typeof parsedSelection.id === "string") {
-        const restored = EXAMPLES.find((diagram) => diagram.id === parsedSelection.id);
-        if (restored) {
-          setSelectedDiagram({ ...restored, source: "example" });
-          rerender(restored.yaml);
-          return;
+
+      try {
+        const rawSelection = localStorage.getItem(SELECTED_DIAGRAM_KEY);
+        if (rawSelection) {
+          const parsedSelection = JSON.parse(rawSelection) as { id?: string; source?: "example" | "local" };
+          if (parsedSelection.source === "local" && typeof parsedSelection.id === "string") {
+            const restored = localDiagrams.find((diagram) => diagram.id === parsedSelection.id);
+            if (restored) {
+              selectedDiagram = restored;
+              yamlText = restored.yaml;
+            }
+          } else if (parsedSelection.source === "example" && typeof parsedSelection.id === "string") {
+            const restored = EXAMPLES.find((diagram) => diagram.id === parsedSelection.id);
+            if (restored) {
+              selectedDiagram = { ...restored, source: "example" };
+              yamlText = restored.yaml;
+            }
+          }
         }
+      } catch {
+        // Fall back to the default example selection already set above.
       }
-      loadExample(EXAMPLES[0].id);
-    } catch {
-      loadExample(EXAMPLES[0].id);
     }
-    ensureMathJax().then(() => rerender(yamlText));
+
+    schedulePreviewRender(yamlText, true);
+
+    return () => {
+      flushPendingLocalDiagramSync();
+      if (pendingRenderTimer !== undefined) {
+        clearTimeout(pendingRenderTimer);
+      }
+      renderWorker?.terminate();
+    };
   });
 
   function parseYamlMetadata(yamlSource: string): Record<string, unknown> | undefined {
@@ -274,7 +389,6 @@ transitions: []
 `;
   }
 
-  rerender(yamlText);
 </script>
 
 <div class="flex h-screen flex-col bg-gray-50">
@@ -419,14 +533,19 @@ transitions: []
           </div>
         </div>
         <div class="min-h-0 flex-1 overflow-hidden">
-          <CodeEditor value={yamlText} onChange={rerender} />
+          <CodeEditor value={yamlText} onChange={(value) => handleSourceChange(value)} />
         </div>
       </section>
 
       <section class="panel flex h-full min-h-0 flex-col rounded-lg overflow-hidden">
         <div class="border-b border-gray-200 px-5 py-4">
           <div class="flex items-center justify-between gap-3">
-            <div class="text-sm font-semibold text-gray-800">SVG Preview</div>
+            <div class="flex items-center gap-3">
+              <div class="text-sm font-semibold text-gray-800">SVG Preview</div>
+              {#if isRendering}
+                <div class="text-xs font-medium uppercase tracking-wide text-[#0067B1]">Rendering…</div>
+              {/if}
+            </div>
             <div class="relative">
               <div class="inline-flex overflow-hidden rounded border border-[#0067B1] shadow-sm">
                 <button
@@ -460,8 +579,12 @@ transitions: []
           {:else if rendered}
             <div class="flex min-h-full items-start justify-center">
               <div class="rounded-sm border border-gray-300 bg-white">
-              {@html rendered.svg}
+                {@html rendered.svg}
               </div>
+            </div>
+          {:else if isRendering}
+            <div class="rounded border border-blue-200 bg-blue-50 p-4 text-sm text-[#003057]">
+              Rendering preview…
             </div>
           {/if}
         </div>
