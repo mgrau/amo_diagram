@@ -1,5 +1,5 @@
-import { buildTermParts } from "./termSymbols";
-import { estimateTextHeightAxes, termScriptFontSize } from "./textMetrics";
+import { buildTermParts, levelLabelText } from "./termSymbols";
+import { estimateTermHorizontalExtentsAxes, estimateTextHeightAxes, estimateTextWidthAxes, termScriptFontSize } from "./textMetrics";
 import type { ColumnSpec, DiagramSpec, LayoutResult, StateLayout, StateSpec, Theme } from "./types";
 
 export function computeLayout(spec: DiagramSpec, theme: Theme): LayoutResult {
@@ -21,6 +21,7 @@ export function computeLayout(spec: DiagramSpec, theme: Theme): LayoutResult {
 
   const figWidth = spec.style.figure_width ?? (columns.length * theme.layout_policy.figure_auto_width_per_group + theme.layout_policy.figure_auto_width_base);
   const figHeight = spec.style.figure_height ?? Math.max(theme.layout_policy.figure_auto_height_min, energyRange / theme.layout_policy.figure_auto_height_energy_scale);
+  const horizontalLayouts = computeHorizontalStateLayouts(states, xCenters, columnWidths, theme);
 
   const resolvedY = new Map<string, number>();
   for (const column of columns) {
@@ -30,7 +31,13 @@ export function computeLayout(spec: DiagramSpec, theme: Theme): LayoutResult {
       .sort((left, right) => left.y - right.y);
 
     for (let index = 1; index < columnStates.length; index += 1) {
-      if (columnStates[index].y - columnStates[index - 1].y < theme.layout_policy.state_overlap_threshold) {
+      if (
+        stateLinesHorizontallyOverlap(
+          horizontalLayouts[columnStates[index - 1].id],
+          horizontalLayouts[columnStates[index].id]
+        ) &&
+        columnStates[index].y - columnStates[index - 1].y < theme.layout_policy.state_overlap_threshold
+      ) {
         columnStates[index].y = columnStates[index - 1].y + theme.layout_policy.state_overlap_threshold;
       }
     }
@@ -40,21 +47,18 @@ export function computeLayout(spec: DiagramSpec, theme: Theme): LayoutResult {
     }
   }
 
-  adjustYPositionsForLabelClearance(states, resolvedY, xCenters, figHeight, theme);
+  adjustYPositionsForLabelClearance(states, resolvedY, horizontalLayouts, figWidth, figHeight, theme);
 
   const resultStates: Record<string, StateLayout> = {};
   for (const state of states) {
-    const columnId = resolveColumnId(state);
-    const center = xCenters[columnId];
-    const width = columnWidths[columnId];
-    const halfLine = 0.5 * theme.state_length * width;
+    const horizontal = horizontalLayouts[state.id];
     resultStates[state.id] = {
       state_id: state.id,
-      x_center: center,
+      x_center: horizontal.x_center,
       y: resolvedY.get(state.id) ?? energyToY(state.energy),
-      x_left: center - halfLine,
-      x_right: center + halfLine,
-      column_id: columnId
+      x_left: horizontal.x_left,
+      x_right: horizontal.x_right,
+      column_id: horizontal.column_id
     };
   }
 
@@ -64,6 +68,12 @@ export function computeLayout(spec: DiagramSpec, theme: Theme): LayoutResult {
     fig_width: figWidth,
     fig_height: figHeight
   };
+}
+
+type HorizontalStateLayout = Pick<StateLayout, "x_center" | "x_left" | "x_right" | "column_id">;
+
+function stateLinesHorizontallyOverlap(left: HorizontalStateLayout, right: HorizontalStateLayout): boolean {
+  return left.x_left <= right.x_right && right.x_left <= left.x_right;
 }
 
 function resolveColumns(spec: DiagramSpec): ColumnSpec[] {
@@ -142,7 +152,8 @@ function computeColumnWidths(groups: ColumnSpec[], theme: Theme): Record<string,
 function adjustYPositionsForLabelClearance(
   states: StateSpec[],
   resolvedY: Map<string, number>,
-  xCenters: Record<string, number>,
+  horizontalLayouts: Record<string, HorizontalStateLayout>,
+  figWidth: number,
   figHeight: number,
   theme: Theme
 ): void {
@@ -150,12 +161,15 @@ function adjustYPositionsForLabelClearance(
   const groups = new Map<string, StateSpec[]>();
 
   for (const state of states) {
-    const groupId = resolveColumnId(state);
-    const side = state.label_side === "auto" ? (xCenters[groupId] <= midpoint ? "left" : "right") : state.label_side;
+    if (state.zeeman_parent) {
+      continue;
+    }
+    const horizontal = horizontalLayouts[state.id];
+    const side = state.label_side === "auto" ? (horizontal.x_center <= midpoint ? "left" : "right") : state.label_side;
     if (side !== "left" && side !== "right") {
       continue;
     }
-    const key = `${groupId}:${side}`;
+    const key = `${horizontal.column_id}:${side}`;
     groups.set(key, [...(groups.get(key) ?? []), state]);
   }
 
@@ -166,7 +180,9 @@ function adjustYPositionsForLabelClearance(
     for (let index = 1; index < ordered.length; index += 1) {
       const previousState = ordered[index - 1];
       const currentState = ordered[index];
-      const minGap = minimumLevelLabelGap(previousState, currentState, figHeight, theme);
+      const minGap = labelsHorizontallyOverlap(previousState, currentState, horizontalLayouts, figWidth, figHeight, theme)
+        ? minimumLevelLabelGap(previousState, currentState, figWidth, figHeight, theme)
+        : 0;
       const previousY = resolvedY.get(previousState.id) ?? minimum;
       const currentY = resolvedY.get(currentState.id) ?? previousY + minGap;
       resolvedY.set(currentState.id, Math.max(currentY, previousY + minGap));
@@ -187,21 +203,107 @@ function adjustYPositionsForLabelClearance(
   }
 }
 
-function minimumLevelLabelGap(lower: StateSpec, upper: StateSpec, figHeight: number, theme: Theme): number {
+function minimumLevelLabelGap(lower: StateSpec, upper: StateSpec, figWidth: number, figHeight: number, theme: Theme): number {
   return (
-    estimatedLevelLabelHeight(lower, figHeight, theme) +
-    estimatedLevelLabelHeight(upper, figHeight, theme)
+    estimatedLevelLabelHeight(lower, figWidth, figHeight, theme) +
+    estimatedLevelLabelHeight(upper, figWidth, figHeight, theme)
   ) / 2 + theme.layout_policy.state_label_clearance_padding;
 }
 
-function estimatedLevelLabelHeight(state: StateSpec, figHeight: number, theme: Theme): number {
+function estimatedLevelLabelHeight(state: StateSpec, figWidth: number, figHeight: number, theme: Theme): number {
   const fontSize = state.font_size ?? theme.state_font_size;
   if (buildTermParts(state)) {
-    const mainHeight = estimateTextHeightAxes(fontSize, { fig_height: figHeight, fig_width: 5, states: {}, group_x_centers: {} }, theme);
-    const scriptHeight = estimateTextHeightAxes(termScriptFontSize(theme, fontSize), { fig_height: figHeight, fig_width: 5, states: {}, group_x_centers: {} }, theme);
+    const mainHeight = estimateTextHeightAxes(fontSize, { fig_height: figHeight, fig_width: figWidth, states: {}, group_x_centers: {} }, theme);
+    const scriptHeight = estimateTextHeightAxes(termScriptFontSize(theme, fontSize), { fig_height: figHeight, fig_width: figWidth, states: {}, group_x_centers: {} }, theme);
     return mainHeight + scriptHeight * theme.layout_policy.term_height_script_scale;
   }
-  return estimateTextHeightAxes(fontSize, { fig_height: figHeight, fig_width: 5, states: {}, group_x_centers: {} }, theme);
+  return estimateTextHeightAxes(fontSize, { fig_height: figHeight, fig_width: figWidth, states: {}, group_x_centers: {} }, theme);
+}
+
+function labelsHorizontallyOverlap(
+  left: StateSpec,
+  right: StateSpec,
+  horizontalLayouts: Record<string, HorizontalStateLayout>,
+  figWidth: number,
+  figHeight: number,
+  theme: Theme
+): boolean {
+  const leftBounds = estimatedLabelHorizontalBounds(left, horizontalLayouts[left.id], figWidth, figHeight, theme);
+  const rightBounds = estimatedLabelHorizontalBounds(right, horizontalLayouts[right.id], figWidth, figHeight, theme);
+  return leftBounds[0] <= rightBounds[1] && rightBounds[0] <= leftBounds[1];
+}
+
+function estimatedLabelHorizontalBounds(
+  state: StateSpec,
+  horizontal: HorizontalStateLayout,
+  figWidth: number,
+  figHeight: number,
+  theme: Theme
+): [number, number] {
+  const layout = { fig_height: figHeight, fig_width: figWidth, states: {}, group_x_centers: {} };
+  const fontSize = state.font_size ?? theme.state_font_size;
+  const parts = buildTermParts(state);
+  const [leftExtent, rightExtent] = parts
+    ? estimateTermHorizontalExtentsAxes(parts, layout, theme, fontSize)
+    : (() => {
+        const width = estimateTextWidthAxes(levelLabelText(state), fontSize, layout, theme);
+        return [width / 2, width / 2] as [number, number];
+      })();
+  const gap = theme.layout_policy.state_label_gap;
+  const midpoint = (theme.layout_policy.axes_x_min + theme.layout_policy.axes_x_max) / 2;
+  const side = state.label_side === "auto" ? (horizontal.x_center <= midpoint ? "left" : "right") : state.label_side;
+  if (side === "left" || side === "below-left") {
+    return [horizontal.x_left - gap - leftExtent - rightExtent, horizontal.x_left - gap];
+  }
+  return [horizontal.x_right + gap, horizontal.x_right + gap + leftExtent + rightExtent];
+}
+
+function computeHorizontalStateLayouts(
+  states: StateSpec[],
+  xCenters: Record<string, number>,
+  columnWidths: Record<string, number>,
+  theme: Theme
+): Record<string, HorizontalStateLayout> {
+  const grouped = new Map<string, StateSpec[]>();
+  for (const state of states) {
+    const columnId = resolveColumnId(state);
+    const key = state.zeeman_parent ? `${columnId}:${state.zeeman_parent}` : `${columnId}:${state.id}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), state]);
+  }
+
+  const output: Record<string, HorizontalStateLayout> = {};
+  for (const statesInGroup of grouped.values()) {
+    const columnId = resolveColumnId(statesInGroup[0]);
+    const baseCenter = xCenters[columnId];
+    const columnWidth = columnWidths[columnId];
+    const fullStateWidth = theme.state_length * columnWidth;
+    const zeemanLineFill = 0.95;
+    const ordered = [...statesInGroup].sort((left, right) => {
+      const magneticDelta = (left.magnetic_quantum_number ?? 0) - (right.magnetic_quantum_number ?? 0);
+      return Math.abs(magneticDelta) > 1e-9
+        ? magneticDelta
+        : left.id.localeCompare(right.id, undefined, { numeric: true });
+    });
+    const zeemanGroup = ordered.length > 1 && ordered.some((state) => state.zeeman_parent);
+    const slotWidth = zeemanGroup
+      ? fullStateWidth * (ordered[0].zeeman_width_scale ?? 0.25)
+      : fullStateWidth;
+    const lineWidth = zeemanGroup ? slotWidth * zeemanLineFill : slotWidth;
+    const halfLine = lineWidth / 2;
+    ordered.forEach((state, index) => {
+      const xCenter = zeemanGroup
+        ? baseCenter + (index - (ordered.length - 1) / 2) * slotWidth
+        : baseCenter;
+      output[state.id] = {
+        x_center: xCenter,
+        x_left: xCenter - halfLine,
+        x_right: xCenter + halfLine,
+        column_id: columnId
+      };
+    });
+  }
+
+  return output;
 }
 
 export function resolveColumnId(state: StateSpec): string {

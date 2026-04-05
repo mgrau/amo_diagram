@@ -11,12 +11,13 @@ states:
     energy: 0.0
     J: 0.5
     zeeman:
-      step: 0.35
+      label_position: below
   2P3/2:
     energy: 4.0
     J: 1.5
     zeeman:
-      step: 0.25
+      energy_step: 0.25
+      width: 0.25
 
 transitions:
   - upper: "2P3/2@m-3_2"

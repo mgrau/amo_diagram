@@ -62,6 +62,8 @@ export interface StateSpec {
   label_y?: number;
   magnetic_quantum_number?: number;
   zeeman_parent?: string;
+  zeeman_width_scale?: number;
+  zeeman_label_position?: "above" | "below";
 }
 
 export interface TransitionSpec {
@@ -256,6 +258,10 @@ export interface StateVisual {
   svg_label_text: string;
   latex_label?: string;
   term_parts?: TermSymbolParts;
+  shared_label?: LabelVisual;
+  shared_svg_label_text?: string;
+  shared_latex_label?: string;
+  shared_term_parts?: TermSymbolParts;
   energy_label?: LabelVisual;
   label_side: string;
 }

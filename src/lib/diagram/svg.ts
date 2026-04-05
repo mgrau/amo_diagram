@@ -1,7 +1,7 @@
 import { pointAlongPolyline, trimPolylineEndpoints } from "./polyline";
+import { estimateTextBlockHeightAxes, estimateTextWidthAxes } from "./textMetrics";
 import { termSymbolFragments } from "./visuals";
 import { renderMathJaxSvg } from "./mathjax";
-import { mjxLabelLatex } from "./termSymbols";
 import type { LayoutResult, Scene, Theme, TransitionVisual } from "./types";
 
 export function sceneToSvg(scene: Scene, layout: LayoutResult, theme: Theme, sourceYaml = ""): string {
@@ -19,6 +19,7 @@ export function sceneToSvg(scene: Scene, layout: LayoutResult, theme: Theme, sou
   const plotTop = topMargin + titleBlockHeight;
   const plotWidth = width - padding * 2;
   const plotHeight = Math.max(1, height - plotTop - bottomMargin - footerBlockHeight);
+  const frame: SvgFrame = { width, height, padding, plotWidth, plotHeight, plotTop, bottomMargin };
 
   const point = ([x, y]: [number, number]) => `${scaleX(x, padding, plotWidth, theme)} ${scaleY(y, plotTop, plotHeight, theme)}`;
   const linecap = "butt";
@@ -26,10 +27,12 @@ export function sceneToSvg(scene: Scene, layout: LayoutResult, theme: Theme, sou
   const stateGroups = Object.values(scene.state_visuals).map((visual) => {
     const stateLine = `<line class="state-line" x1="${scaleX(visual.layout.x_left, padding, plotWidth, theme)}" y1="${scaleY(visual.layout.y, plotTop, plotHeight, theme)}" x2="${scaleX(visual.layout.x_right, padding, plotWidth, theme)}" y2="${scaleY(visual.layout.y, plotTop, plotHeight, theme)}" stroke="${theme.state_color}" stroke-width="${theme.state_linewidth}" stroke-linecap="${linecap}" />`;
     const label = renderStateLabel(visual, layout, theme, padding, plotWidth, plotTop, plotHeight);
+    const sharedLabel = renderSharedStateLabel(visual, layout, theme, padding, plotWidth, plotTop, plotHeight);
     return [
       `    <g class="state" id="${safeId(visual.state.id)}">`,
       `      ${stateLine}`,
       `      ${label}`,
+      sharedLabel ? `      ${sharedLabel}` : "",
       `    </g>`
     ].join("\n");
   }).join("\n");
@@ -44,10 +47,11 @@ export function sceneToSvg(scene: Scene, layout: LayoutResult, theme: Theme, sou
   const footer = scene.footer
     ? renderMathJaxOrText(scene.footer, width / 2, height - bottomMargin, theme.footer_font_size, theme, "center", "bottom", "diagram-footer")
     : "";
+  const canvas = expandCanvasToFit(scene, layout, theme, frame);
 
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${canvas.width} ${canvas.height}" width="${canvas.width}" height="${canvas.height}">`,
     indentBlock(renderMetadata(sourceYaml), 1),
     `  <style>`,
     `    text { fill: #172033; }`,
@@ -56,7 +60,7 @@ export function sceneToSvg(scene: Scene, layout: LayoutResult, theme: Theme, sou
     `    .transition-arrowhead-triangle, .transition-arrowhead-stealth { stroke: none; }`,
     `    .transition-arrowhead-angle { fill: none; }`,
     `  </style>`,
-    `  <g class="diagram-root">`,
+    `  <g class="diagram-root"${canvas.offsetX || canvas.offsetY ? ` transform="translate(${canvas.offsetX} ${canvas.offsetY})"` : ""}>`,
     title ? `    ${title}` : "",
     `    <g class="states">`,
     stateGroups,
@@ -70,6 +74,267 @@ export function sceneToSvg(scene: Scene, layout: LayoutResult, theme: Theme, sou
   ].filter(Boolean).join("\n");
 }
 
+type SvgFrame = {
+  width: number;
+  height: number;
+  padding: number;
+  plotWidth: number;
+  plotHeight: number;
+  plotTop: number;
+  bottomMargin: number;
+};
+
+type PixelBounds = {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+};
+
+function expandCanvasToFit(scene: Scene, layout: LayoutResult, theme: Theme, frame: SvgFrame): {
+  width: number;
+  height: number;
+  offsetX: number;
+  offsetY: number;
+} {
+  const bounds = measureSceneBounds(scene, layout, theme, frame);
+  const edgePadding = 6;
+  const overflowLeft = Math.max(0, edgePadding - bounds.minX);
+  const overflowTop = Math.max(0, edgePadding - bounds.minY);
+  const overflowRight = Math.max(0, bounds.maxX - (frame.width - edgePadding));
+  const overflowBottom = Math.max(0, bounds.maxY - (frame.height - edgePadding));
+  return {
+    width: Math.ceil(frame.width + overflowLeft + overflowRight),
+    height: Math.ceil(frame.height + overflowTop + overflowBottom),
+    offsetX: Math.ceil(overflowLeft),
+    offsetY: Math.ceil(overflowTop)
+  };
+}
+
+function measureSceneBounds(scene: Scene, layout: LayoutResult, theme: Theme, frame: SvgFrame): PixelBounds {
+  const bounds: PixelBounds = {
+    minX: Number.POSITIVE_INFINITY,
+    minY: Number.POSITIVE_INFINITY,
+    maxX: Number.NEGATIVE_INFINITY,
+    maxY: Number.NEGATIVE_INFINITY
+  };
+
+  Object.values(scene.state_visuals).forEach((visual) => {
+    includePoint(bounds, scaleX(visual.layout.x_left, frame.padding, frame.plotWidth, theme), scaleY(visual.layout.y, frame.plotTop, frame.plotHeight, theme), theme.state_linewidth / 2);
+    includePoint(bounds, scaleX(visual.layout.x_right, frame.padding, frame.plotWidth, theme), scaleY(visual.layout.y, frame.plotTop, frame.plotHeight, theme), theme.state_linewidth / 2);
+    includeStructuredStateLabelBounds(bounds, visual.label, visual.svg_label_text, visual.latex_label, visual.term_parts, layout, theme, frame);
+    if (visual.shared_label && visual.shared_svg_label_text) {
+      includeStructuredStateLabelBounds(
+        bounds,
+        visual.shared_label,
+        visual.shared_svg_label_text,
+        visual.shared_latex_label,
+        visual.shared_term_parts,
+        layout,
+        theme,
+        frame
+      );
+    }
+  });
+
+  scene.transition_visuals.forEach((visual) => {
+    visual.points.forEach(([x, y]) => {
+      includePoint(bounds, scaleX(x, frame.padding, frame.plotWidth, theme), scaleY(y, frame.plotTop, frame.plotHeight, theme), visual.linewidth / 2);
+    });
+    if (visual.start_marker) {
+      arrowheadVertices(visual.points[1], visual.points[0], theme, visual.arrowhead).forEach(([x, y]) => {
+        includePoint(bounds, scaleX(x, frame.padding, frame.plotWidth, theme), scaleY(y, frame.plotTop, frame.plotHeight, theme), visual.linewidth / 2);
+      });
+    }
+    if (visual.end_marker) {
+      arrowheadVertices(visual.points.at(-2)!, visual.points.at(-1)!, theme, visual.arrowhead).forEach(([x, y]) => {
+        includePoint(bounds, scaleX(x, frame.padding, frame.plotWidth, theme), scaleY(y, frame.plotTop, frame.plotHeight, theme), visual.linewidth / 2);
+      });
+    }
+    if (visual.label) {
+      includeTextLabelBounds(bounds, visual.label, visual.label.text, visual.label.fontSize ?? theme.transition_font_size, layout, theme, frame, "plot");
+    }
+  });
+
+  if (scene.title) {
+    includeHeaderFooterBounds(bounds, scene.title, frame.width / 2, 0, theme.title_font_size, theme, "center", "top", layout, frame);
+  }
+  if (scene.footer) {
+    includeHeaderFooterBounds(bounds, scene.footer, frame.width / 2, frame.height - frame.bottomMargin, theme.footer_font_size, theme, "center", "bottom", layout, frame);
+  }
+
+  if (!Number.isFinite(bounds.minX)) {
+    return { minX: 0, minY: 0, maxX: frame.width, maxY: frame.height };
+  }
+  return bounds;
+}
+
+function includeStructuredStateLabelBounds(
+  bounds: PixelBounds,
+  label: Scene["state_visuals"][string]["label"],
+  svgLabelText: string,
+  latexLabel: string | undefined,
+  termParts: Scene["state_visuals"][string]["term_parts"],
+  layout: LayoutResult,
+  theme: Theme,
+  frame: SvgFrame
+): void {
+  if (theme.mathjax_labels && latexLabel) {
+    const mjx = renderMathJaxSvg(latexLabel);
+    if (mjx) {
+      const fontSize = label.fontSize ?? theme.state_font_size;
+      const scale = fontSize * theme.layout_policy.mathjax_scale;
+      const width = mjx.width * scale;
+      const height = mjx.height * scale;
+      const cx = scaleX(label.x, frame.padding, frame.plotWidth, theme);
+      const cy = scaleY(label.y, frame.plotTop, frame.plotHeight, theme);
+      includeRect(bounds, cx - width / 2, cy - height / 2, cx + width / 2, cy + height / 2);
+      return;
+    }
+  }
+  if (termParts) {
+    termSymbolFragments({
+      state: {} as Scene["state_visuals"][string]["state"],
+      layout: {} as Scene["state_visuals"][string]["layout"],
+      label,
+      svg_label_text: svgLabelText,
+      latex_label: latexLabel,
+      term_parts: termParts,
+      label_side: "right"
+    }, layout, theme).forEach((fragment) => {
+      includeTextLabelBounds(bounds, fragment, fragment.text, fragment.fontSize ?? theme.state_font_size, layout, theme, frame, "plot");
+    });
+    return;
+  }
+  includeTextLabelBounds(bounds, label, svgLabelText, label.fontSize ?? theme.state_font_size, layout, theme, frame, "plot");
+}
+
+function includeHeaderFooterBounds(
+  bounds: PixelBounds,
+  text: string,
+  x: number,
+  y: number,
+  fontSize: number,
+  theme: Theme,
+  ha: "left" | "center" | "right",
+  va: "top" | "center" | "bottom",
+  layout: LayoutResult,
+  frame: SvgFrame
+): void {
+  if (theme.mathjax_labels && text.startsWith("$") && text.endsWith("$")) {
+    const mjx = renderMathJaxSvg(text.slice(1, -1));
+    if (mjx) {
+      const scale = fontSize * theme.layout_policy.mathjax_scale;
+      const width = mjx.width * scale;
+      const height = mjx.height * scale;
+      const left = ha === "center" ? x - width / 2 : ha === "right" ? x - width : x;
+      const top = va === "top" ? y : va === "bottom" ? y - height : y - height / 2;
+      includeRect(bounds, left, top, left + width, top + height);
+      return;
+    }
+  }
+  includeTextLabelBounds(bounds, { x, y, ha, va }, text, fontSize, layout, theme, frame, "pixel");
+}
+
+function includeTextLabelBounds(
+  bounds: PixelBounds,
+  label: Pick<Scene["state_visuals"][string]["label"], "x" | "y" | "ha" | "va" | "rotation">,
+  text: string,
+  fontSize: number,
+  layout: LayoutResult,
+  theme: Theme,
+  frame: SvgFrame,
+  coordinateSpace: "plot" | "pixel"
+): void {
+  const x = coordinateSpace === "plot" ? scaleX(label.x, frame.padding, frame.plotWidth, theme) : label.x;
+  const y = coordinateSpace === "plot" ? scaleY(label.y, frame.plotTop, frame.plotHeight, theme) : label.y;
+  const width = estimateTextWidthPx(text, fontSize, layout, theme);
+  const height = estimateTextBlockHeightPx(text, fontSize, layout, theme);
+  const left = label.ha === "center" ? x - width / 2 : label.ha === "right" ? x - width : x;
+  const top = label.va === "top" ? y : label.va === "bottom" ? y - height : y - height / 2;
+  includeRotatedRect(bounds, left, top, width, height, x, y, label.rotation ?? 0);
+}
+
+function includeRotatedRect(
+  bounds: PixelBounds,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+  originX: number,
+  originY: number,
+  rotationDegrees: number
+): void {
+  const corners: Array<[number, number]> = [
+    [left, top],
+    [left + width, top],
+    [left + width, top + height],
+    [left, top + height]
+  ];
+  if (Math.abs(rotationDegrees) < 1e-9) {
+    corners.forEach(([x, y]) => includePoint(bounds, x, y));
+    return;
+  }
+  const radians = rotationDegrees * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  corners.forEach(([x, y]) => {
+    const dx = x - originX;
+    const dy = y - originY;
+    includePoint(bounds, originX + dx * cos - dy * sin, originY + dx * sin + dy * cos);
+  });
+}
+
+function arrowheadVertices(
+  start: [number, number],
+  end: [number, number],
+  theme: Theme,
+  style: "triangle" | "angle" | "stealth"
+): Array<[number, number]> {
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const length = Math.hypot(dx, dy);
+  const ux = dx / Math.max(length, 1e-9);
+  const uy = dy / Math.max(length, 1e-9);
+  const nx = -uy;
+  const ny = ux;
+  const arrowLength = theme.arrowsize * theme.layout_policy.arrowhead_length_scale;
+  const arrowWidth = arrowLength * theme.layout_policy.arrowhead_width_scale;
+  const base: [number, number] = [end[0] - ux * arrowLength, end[1] - uy * arrowLength];
+  const left: [number, number] = [base[0] + nx * arrowWidth, base[1] + ny * arrowWidth];
+  const right: [number, number] = [base[0] - nx * arrowWidth, base[1] - ny * arrowWidth];
+  if (style === "angle") {
+    return [left, end, right];
+  }
+  if (style === "stealth") {
+    const notch: [number, number] = [end[0] - ux * arrowLength * 0.56, end[1] - uy * arrowLength * 0.56];
+    const rear: [number, number] = [end[0] - ux * arrowLength * 1.08, end[1] - uy * arrowLength * 1.08];
+    const rearLeft: [number, number] = [rear[0] + nx * arrowWidth * 0.68, rear[1] + ny * arrowWidth * 0.68];
+    const rearRight: [number, number] = [rear[0] - nx * arrowWidth * 0.68, rear[1] - ny * arrowWidth * 0.68];
+    return [end, left, rearLeft, notch, rearRight, right];
+  }
+  return [end, left, right];
+}
+
+function estimateTextWidthPx(text: string, fontSize: number, layout: LayoutResult, theme: Theme): number {
+  return estimateTextWidthAxes(text, fontSize, layout, theme) * layout.fig_width * 96;
+}
+
+function estimateTextBlockHeightPx(text: string, fontSize: number, layout: LayoutResult, theme: Theme): number {
+  return estimateTextBlockHeightAxes(text, fontSize, layout, theme) * layout.fig_height * 96;
+}
+
+function includeRect(bounds: PixelBounds, left: number, top: number, right: number, bottom: number): void {
+  bounds.minX = Math.min(bounds.minX, left);
+  bounds.minY = Math.min(bounds.minY, top);
+  bounds.maxX = Math.max(bounds.maxX, right);
+  bounds.maxY = Math.max(bounds.maxY, bottom);
+}
+
+function includePoint(bounds: PixelBounds, x: number, y: number, pad = 0): void {
+  includeRect(bounds, x - pad, y - pad, x + pad, y + pad);
+}
+
 function renderStateLabel(
   visual: Scene["state_visuals"][string],
   layout: LayoutResult,
@@ -79,42 +344,93 @@ function renderStateLabel(
   plotTop: number,
   plotHeight: number
 ): string {
-  if (theme.mathjax_labels) {
-    const mjxSvg = renderMathJaxStateLabel(visual, theme, padding, plotWidth, plotTop, plotHeight);
-    if (mjxSvg) return mjxSvg;
-  }
-  return visual.term_parts
-    ? renderTermLabel(visual, layout, theme, padding, plotWidth, plotTop, plotHeight)
-    : renderText(
-        visual.label.text,
-        scaleX(visual.label.x, padding, plotWidth, theme),
-        scaleY(visual.label.y, plotTop, plotHeight, theme),
-        visual.label.fontSize ?? theme.state_font_size,
-        theme.font_family,
-        visual.label.ha,
-        visual.label.va,
-        visual.label.rotation ?? 0
-      );
+  return renderStructuredStateLabel(
+    visual.label,
+    visual.svg_label_text,
+    visual.latex_label,
+    visual.term_parts,
+    layout,
+    theme,
+    padding,
+    plotWidth,
+    plotTop,
+    plotHeight
+  );
 }
 
-function renderMathJaxStateLabel(
+function renderSharedStateLabel(
   visual: Scene["state_visuals"][string],
+  layout: LayoutResult,
   theme: Theme,
   padding: number,
   plotWidth: number,
   plotTop: number,
   plotHeight: number
 ): string {
-  const latex = mjxLabelLatex(visual.state);
-  if (!latex) return "";
+  if (!visual.shared_label || !visual.shared_svg_label_text) {
+    return "";
+  }
+  return renderStructuredStateLabel(
+    visual.shared_label,
+    visual.shared_svg_label_text,
+    visual.shared_latex_label,
+    visual.shared_term_parts,
+    layout,
+    theme,
+    padding,
+    plotWidth,
+    plotTop,
+    plotHeight
+  );
+}
+
+function renderStructuredStateLabel(
+  label: Scene["state_visuals"][string]["label"],
+  svgLabelText: string,
+  latexLabel: string | undefined,
+  termParts: Scene["state_visuals"][string]["term_parts"],
+  layout: LayoutResult,
+  theme: Theme,
+  padding: number,
+  plotWidth: number,
+  plotTop: number,
+  plotHeight: number
+): string {
+  if (theme.mathjax_labels && latexLabel) {
+    const mjxSvg = renderMathJaxStateLabel(label, latexLabel, theme, padding, plotWidth, plotTop, plotHeight);
+    if (mjxSvg) return mjxSvg;
+  }
+  return termParts
+    ? renderTermLabel(label, termParts, layout, theme, padding, plotWidth, plotTop, plotHeight, latexLabel)
+    : renderText(
+        svgLabelText,
+        scaleX(label.x, padding, plotWidth, theme),
+        scaleY(label.y, plotTop, plotHeight, theme),
+        label.fontSize ?? theme.state_font_size,
+        theme.font_family,
+        label.ha,
+        label.va,
+        label.rotation ?? 0
+      );
+}
+
+function renderMathJaxStateLabel(
+  label: Scene["state_visuals"][string]["label"],
+  latex: string,
+  theme: Theme,
+  padding: number,
+  plotWidth: number,
+  plotTop: number,
+  plotHeight: number
+): string {
   const mjx = renderMathJaxSvg(latex);
   if (!mjx) return "";
-  const fontSize = visual.label.fontSize ?? theme.state_font_size;
+  const fontSize = label.fontSize ?? theme.state_font_size;
   const scale = fontSize * theme.layout_policy.mathjax_scale;
   const wPx = mjx.width * scale;
   const hPx = mjx.height * scale;
-  const cx = scaleX(visual.label.x, padding, plotWidth, theme);
-  const cy = scaleY(visual.label.y, plotTop, plotHeight, theme);
+  const cx = scaleX(label.x, padding, plotWidth, theme);
+  const cy = scaleY(label.y, plotTop, plotHeight, theme);
   return `<svg class="state-label" x="${cx - wPx / 2}" y="${cy - hPx / 2}" width="${wPx}" height="${hPx}" viewBox="${mjx.minX} ${mjx.minY} ${mjx.width} ${mjx.height}" overflow="visible">${mjx.innerSvg}</svg>`;
 }
 
@@ -231,19 +547,30 @@ function arrowheadShaftInset(style: "triangle" | "angle" | "stealth", arrowLengt
 }
 
 function renderTermLabel(
-  visual: Scene["state_visuals"][string],
+  label: Scene["state_visuals"][string]["label"],
+  termParts: NonNullable<Scene["state_visuals"][string]["term_parts"]>,
   layout: LayoutResult,
   theme: Theme,
   padding: number,
   plotWidth: number,
   plotTop: number,
-  plotHeight: number
+  plotHeight: number,
+  latexLabel?: string
 ): string {
-  const tspans = termSymbolFragments(visual, layout, theme).map((fragment) => {
+  const fragments = termSymbolFragments({
+    state: {} as Scene["state_visuals"][string]["state"],
+    layout: {} as Scene["state_visuals"][string]["layout"],
+    label,
+    svg_label_text: label.text,
+    term_parts: termParts,
+    label_side: "right",
+    latex_label: latexLabel
+  }, layout, theme);
+  const tspans = fragments.map((fragment) => {
     const className = `term-${fragment.role}`;
     return `<tspan class="${className}" x="${scaleX(fragment.x, padding, plotWidth, theme)}" y="${scaleY(fragment.y, plotTop, plotHeight, theme)}" font-size="${fragment.fontSize ?? (fragment.role === "main" || fragment.role === "prefix" ? theme.state_font_size : theme.state_font_size * theme.layout_policy.term_script_font_scale)}">${escape(fragment.text)}</tspan>`;
   }).join("");
-  const latex = visual.latex_label ? ` data-latex="${escape(visual.latex_label)}"` : "";
+  const latex = latexLabel ? ` data-latex="${escape(latexLabel)}"` : "";
   return `<text class="state-label" font-family="${theme.font_family}" dominant-baseline="middle"${latex}>${tspans}</text>`;
 }
 

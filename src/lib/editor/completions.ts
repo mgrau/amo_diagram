@@ -46,8 +46,11 @@ const completions: Completion[] = [
   "label_side:",
   "label_va:",
   "zeeman:",
+  "energy_step:",
   "step:",
   "values:",
+  "width:",
+  "label_position:",
   "upper:",
   "lower:",
   "wavelength_nm:",
@@ -90,7 +93,9 @@ const completions: Completion[] = [
   "auto",
   "center",
   "bottom",
-  "top"
+  "top",
+  "above",
+  "below"
 ].map((label) => ({ label, type: label.endsWith(":") ? "property" : "keyword" }));
 
 export const yamlCompletions = autocompletion({

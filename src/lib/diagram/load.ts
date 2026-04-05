@@ -1,13 +1,14 @@
 import YAML from "yaml";
 import defaultsRaw from "./defaults.yaml?raw";
-import { formatJ, levelLabelLatex, levelLabelText } from "./termSymbols";
 import type { ColumnSpec, DiagramSpec, LayoutPolicyOverrides, StateSpec, Style, TransitionSpec } from "./types";
 
 type JsonObject = Record<string, unknown>;
 type ArrowMode = "none" | "single" | "double";
 type ZeemanExpansion = {
-  step: number;
+  energyStep: number;
   values: number[];
+  widthScale: number;
+  labelPosition: "above" | "below";
 };
 
 const builtInDefaults = YAML.parse(defaultsRaw) as JsonObject;
@@ -243,23 +244,29 @@ function normalizeZeeman(value: unknown, state: StateSpec): ZeemanExpansion | un
 
   if (typeof value === "number") {
     return {
-      step: value,
-      values: inferZeemanValues(state)
+      energyStep: value,
+      values: inferZeemanValues(state),
+      widthScale: 0.25,
+      labelPosition: "above"
     };
   }
 
   if (value === true) {
     return {
-      step: 0,
-      values: inferZeemanValues(state)
+      energyStep: 0,
+      values: inferZeemanValues(state),
+      widthScale: 0.25,
+      labelPosition: "above"
     };
   }
 
   const zeeman = asObject(value, `zeeman expansion for state ${state.id}`);
   const values = numberArrayMaybe(zeeman.values) ?? inferZeemanValues(state);
   return {
-    step: numberMaybe(zeeman.step ?? zeeman.spacing) ?? 0,
-    values: [...values].sort((left, right) => left - right)
+    energyStep: numberMaybe(zeeman.energy_step ?? zeeman.step ?? zeeman.spacing) ?? 0,
+    values: [...values].sort((left, right) => left - right),
+    widthScale: numberMaybe(zeeman.width ?? zeeman.sublevel_width ?? zeeman.width_scale) ?? 0.25,
+    labelPosition: asZeemanLabelPosition(zeeman.label_position)
   };
 }
 
@@ -279,28 +286,18 @@ function inferZeemanValues(state: StateSpec): number[] {
 }
 
 function expandZeemanState(state: StateSpec, zeeman: ZeemanExpansion): StateSpec[] {
-  const baseLabel = levelLabelText(state);
-  const baseLatex = levelLabelLatex(state);
   return zeeman.values.map((magneticQuantumNumber) => {
-    const suffix = `m_J = ${formatSignedQuantumNumber(magneticQuantumNumber)}`;
     return {
       ...state,
       id: zeemanStateId(state.id, magneticQuantumNumber),
-      label: `${baseLabel}\n${suffix}`,
-      term: baseLatex ? appendZeemanLatex(baseLatex, magneticQuantumNumber) : undefined,
-      energy: state.energy + magneticQuantumNumber * zeeman.step,
+      energy: state.energy + magneticQuantumNumber * zeeman.energyStep,
       y_position: undefined,
       magnetic_quantum_number: magneticQuantumNumber,
-      zeeman_parent: state.id
+      zeeman_parent: state.id,
+      zeeman_width_scale: zeeman.widthScale,
+      zeeman_label_position: zeeman.labelPosition
     };
   });
-}
-
-function appendZeemanLatex(baseLatex: string, magneticQuantumNumber: number): string {
-  const body = baseLatex.startsWith("$") && baseLatex.endsWith("$")
-    ? baseLatex.slice(1, -1)
-    : baseLatex;
-  return `$${body}\\;\\left(m_{J}=${latexQuantumNumber(magneticQuantumNumber)}\\right)$`;
 }
 
 function zeemanStateId(baseId: string, magneticQuantumNumber: number): string {
@@ -319,22 +316,6 @@ function formatZeemanIdValue(value: number): string {
   return `${value > 0 ? "+" : ""}${value.toString().replace(".", "_")}`;
 }
 
-function formatSignedQuantumNumber(value: number): string {
-  const formatted = formatJ(value) ?? value.toString();
-  return value > 0 ? `+${formatted}` : formatted;
-}
-
-function latexQuantumNumber(value: number): string {
-  const doubled = Math.round(value * 2);
-  if (Math.abs(value * 2 - doubled) > 1e-9) {
-    return value.toString();
-  }
-  if (doubled % 2 === 0) {
-    return `${doubled / 2}`;
-  }
-  return doubled < 0 ? `-\\frac{${Math.abs(doubled)}}{2}` : `\\frac{${doubled}}{2}`;
-}
-
 function resolveArrowMode(transition: JsonObject, decay: boolean): ArrowMode {
   if (decay) {
     return "single";
@@ -349,7 +330,10 @@ function resolveArrowMode(transition: JsonObject, decay: boolean): ArrowMode {
   if (transition.arrow === false) {
     return "none";
   }
-  return booleanOr(transition.arrow, true) ? "single" : "none";
+  if (transition.arrow === true || transition.arrow_both_ends === false) {
+    return "single";
+  }
+  return "double";
 }
 
 function deepMerge(base: JsonObject, override: JsonObject): JsonObject {
@@ -499,6 +483,10 @@ function asLabelVa(value: unknown): "top" | "center" | "bottom" {
 
 function asTransitionPosition(value: unknown): "transition" | "left" | "right" | "auto" {
   return value === "transition" || value === "left" || value === "right" ? value : "auto";
+}
+
+function asZeemanLabelPosition(value: unknown): "above" | "below" {
+  return value === "below" ? "below" : "above";
 }
 
 function asArrowMode(value: unknown): ArrowMode | undefined {
