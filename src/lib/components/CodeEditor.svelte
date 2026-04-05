@@ -8,12 +8,32 @@
   import { tags } from "@lezer/highlight";
   import { yamlCompletions } from "../editor/completions";
   import { semanticHighlight, semanticHighlightTheme } from "../editor/semanticHighlight";
+  import { colorPickerExtension, type ColorSwatchClickDetail } from "../editor/colorPicker";
 
   export let value = "";
   export let onChange: (value: string) => void = () => {};
 
   let host: HTMLDivElement;
   let view: EditorView | undefined;
+  let colorInput: HTMLInputElement;
+  let pendingColorRange: { from: number; to: number } | null = null;
+
+  function handleColorSwatchClick(e: Event): void {
+    const detail = (e as CustomEvent<ColorSwatchClickDetail>).detail;
+    pendingColorRange = { from: detail.from, to: detail.to };
+    colorInput.value = detail.color;
+    colorInput.style.left = `${detail.x}px`;
+    colorInput.style.top = `${detail.y}px`;
+    colorInput.click();
+  }
+
+  function handleColorInput(): void {
+    if (!pendingColorRange || !view) return;
+    const { from, to } = pendingColorRange;
+    view.dispatch({
+      changes: { from, to, insert: colorInput.value }
+    });
+  }
 
   function insertYamlNewlineIndent(editorView: EditorView): boolean {
     const { state } = editorView;
@@ -97,6 +117,7 @@
   ]);
 
   onMount(() => {
+    host.addEventListener("color-swatch-click", handleColorSwatchClick);
     view = new EditorView({
       parent: host,
       state: EditorState.create({
@@ -116,6 +137,7 @@
           yamlCompletions,
           syntaxHighlighting(yamlHighlight),
           semanticHighlight,
+          colorPickerExtension,
           yamlTheme,
           semanticHighlightTheme,
           EditorView.lineWrapping,
@@ -135,7 +157,16 @@
     });
   }
 
-  onDestroy(() => view?.destroy());
+  onDestroy(() => {
+    host.removeEventListener("color-swatch-click", handleColorSwatchClick);
+    view?.destroy();
+  });
 </script>
 
 <div bind:this={host} class="h-full w-full overflow-hidden"></div>
+<input
+  bind:this={colorInput}
+  type="color"
+  on:input={handleColorInput}
+  style="position:fixed; opacity:0; pointer-events:none; width:0; height:0;"
+/>
