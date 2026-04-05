@@ -3,18 +3,16 @@
   import YAML from "yaml";
   import CodeEditor from "./lib/components/CodeEditor.svelte";
   import HelpModal from "./lib/components/HelpModal.svelte";
+  import { deriveDiagramListMetadata, emptyDiagramTemplate } from "./lib/diagramDocument";
   import type { RenderedDiagram } from "./lib/diagram/render";
   import { createPdfBlob, createPngBlob, createSvgBlob, downloadPdf, downloadPng, downloadSvg, embedEditorLinkInSvg, extractYamlFromSvg } from "./lib/diagram/export";
   import type { RenderWorkerResponse } from "./lib/diagram/renderWorkerTypes";
-  import { EXAMPLES, type ExampleDiagram } from "./lib/examples";
+  import { buildLocalDiagram, loadLocalDiagrams, persistLocalDiagrams, persistSelectedDiagram, restoreSelectedDiagram, type MenuDiagram, type SavedDiagram } from "./lib/diagramLibrary";
+  import { EXAMPLES } from "./lib/examples";
   import { buildSharedDiagramUrls, decodeSharedDiagramSource, parseSharedDiagramRequest, type SharedDiagramOutput } from "./lib/urlState";
 
-  type SavedDiagram = ExampleDiagram & { source: "local" };
-  type MenuDiagram = ExampleDiagram & { source: "example" | "local" };
   type ShareLinks = Record<SharedDiagramOutput, string>;
 
-  const LOCAL_STORAGE_KEY = "state-diagram-studio.local-diagrams";
-  const SELECTED_DIAGRAM_KEY = "state-diagram-studio.selected-diagram";
   let localDiagrams: SavedDiagram[] = [];
   let selectedDiagram: MenuDiagram = { ...EXAMPLES[0], source: "example" };
   let yamlText = selectedDiagram.yaml;
@@ -81,7 +79,7 @@
     const name = `Untitled ${localDiagrams.length + 1}`;
     const next = buildLocalDiagram(name, "New local diagram", emptyDiagramTemplate(name));
     localDiagrams = [next, ...localDiagrams];
-    persistLocalDiagrams();
+    persistLocalDiagrams(browserStorage, localDiagrams);
     setSelectedDiagram(next);
     handleSourceChange(next.yaml, true);
   }
@@ -90,7 +88,7 @@
     const nextDiagrams = localDiagrams.filter((diagram) => diagram.id !== diagramId);
     const wasSelected = selectedDiagram.source === "local" && selectedDiagram.id === diagramId;
     localDiagrams = nextDiagrams;
-    persistLocalDiagrams();
+    persistLocalDiagrams(browserStorage, localDiagrams);
     if (wasSelected) {
       loadExample(EXAMPLES[0].id);
     }
@@ -116,7 +114,7 @@
       const nextYaml = YAML.stringify(YAML.parse(rawYaml));
       const created = buildLocalDiagram(file.name, "Imported from a local file", nextYaml);
       localDiagrams = [created, ...localDiagrams];
-      persistLocalDiagrams();
+      persistLocalDiagrams(browserStorage, localDiagrams);
       setSelectedDiagram(created);
       handleSourceChange(created.yaml, true);
     } catch (caught) {
@@ -127,7 +125,7 @@
   }
 
   function exportFilename(ext: string): string {
-    const base = rendered?.spec.metadata.name ?? selectedDiagram.id;
+    const base = rendered?.name ?? selectedDiagram.name ?? selectedDiagram.id;
     return `${base}.${ext}`;
   }
 
@@ -163,17 +161,6 @@
     anchor.download = filename;
     anchor.click();
     URL.revokeObjectURL(url);
-  }
-
-  function buildLocalDiagram(name: string, description: string, yaml: string): SavedDiagram {
-    const derived = deriveLocalDiagramMetadata(yaml, name, description);
-    return {
-      id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: derived.name,
-      description: derived.description,
-      yaml,
-      source: "local"
-    };
   }
 
   function resetShareState(): void {
@@ -288,13 +275,11 @@
     if (selectedDiagram.source !== "local") {
       return;
     }
-    const updated: SavedDiagram = {
+    selectedDiagram = {
       ...selectedDiagram,
       source: "local",
       yaml: source
     };
-    selectedDiagram = updated;
-    localDiagrams = localDiagrams.map((diagram) => diagram.id === updated.id ? updated : diagram);
   }
 
   function scheduleLocalDiagramSync(source: string): void {
@@ -326,7 +311,7 @@
     }
     const source = pendingLocalSyncSource;
     pendingLocalSyncSource = null;
-    const derived = deriveLocalDiagramMetadata(source, selectedDiagram.name, selectedDiagram.description);
+    const derived = deriveDiagramListMetadata(source, selectedDiagram.name, selectedDiagram.description);
     const updated: SavedDiagram = {
       ...selectedDiagram,
       source: "local",
@@ -336,7 +321,7 @@
     };
     selectedDiagram = updated;
     localDiagrams = localDiagrams.map((diagram) => diagram.id === updated.id ? updated : diagram);
-    persistLocalDiagrams();
+    persistLocalDiagrams(browserStorage, localDiagrams);
   }
 
   function schedulePreviewRender(source: string, immediate = false): void {
@@ -399,20 +384,11 @@
     error = message.error;
   }
 
-  const hasLocalStorage = typeof localStorage !== "undefined";
-
-  function persistLocalDiagrams(): void {
-    if (!hasLocalStorage) return;
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(localDiagrams));
-  }
+  const browserStorage = typeof localStorage === "undefined" ? undefined : localStorage;
 
   function setSelectedDiagram(diagram: MenuDiagram): void {
     selectedDiagram = diagram;
-    if (!hasLocalStorage) return;
-    localStorage.setItem(SELECTED_DIAGRAM_KEY, JSON.stringify({
-      id: diagram.id,
-      source: diagram.source
-    }));
+    persistSelectedDiagram(browserStorage, diagram);
   }
 
   onMount(() => {
@@ -457,48 +433,11 @@
   });
 
   function restoreLocalState(): void {
-    if (!hasLocalStorage) {
-      return;
-    }
-    try {
-      const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          localDiagrams = parsed.filter((item): item is SavedDiagram =>
-            Boolean(item) &&
-            typeof item === "object" &&
-            typeof item.id === "string" &&
-            typeof item.name === "string" &&
-            typeof item.description === "string" &&
-            typeof item.yaml === "string"
-          ).map((item) => ({ ...item, source: "local" }));
-        }
-      }
-    } catch {
-      localDiagrams = [];
-    }
-
-    try {
-      const rawSelection = localStorage.getItem(SELECTED_DIAGRAM_KEY);
-      if (rawSelection) {
-        const parsedSelection = JSON.parse(rawSelection) as { id?: string; source?: "example" | "local" };
-        if (parsedSelection.source === "local" && typeof parsedSelection.id === "string") {
-          const restored = localDiagrams.find((diagram) => diagram.id === parsedSelection.id);
-          if (restored) {
-            selectedDiagram = restored;
-            yamlText = restored.yaml;
-          }
-        } else if (parsedSelection.source === "example" && typeof parsedSelection.id === "string") {
-          const restored = EXAMPLES.find((diagram) => diagram.id === parsedSelection.id);
-          if (restored) {
-            selectedDiagram = { ...restored, source: "example" };
-            yamlText = restored.yaml;
-          }
-        }
-      }
-    } catch {
-      // Fall back to the default example selection already set above.
+    localDiagrams = loadLocalDiagrams(browserStorage);
+    const restored = restoreSelectedDiagram(browserStorage, localDiagrams, EXAMPLES);
+    if (restored) {
+      selectedDiagram = restored;
+      yamlText = restored.yaml;
     }
   }
 
@@ -516,7 +455,7 @@
     if (output === "editor") {
       const imported = buildLocalDiagram("Shared Diagram", "Imported from a shared link", source);
       localDiagrams = [imported, ...localDiagrams];
-      persistLocalDiagrams();
+      persistLocalDiagrams(browserStorage, localDiagrams);
       setSelectedDiagram(imported);
       yamlText = imported.yaml;
       clearSharedDiagramUrl();
@@ -534,49 +473,6 @@
     current.searchParams.delete("diagram");
     current.searchParams.delete("output");
     window.history.replaceState({}, "", `${current.pathname}${current.search}${current.hash}`);
-  }
-
-  function parseYamlMetadata(yamlSource: string): Record<string, unknown> | undefined {
-    try {
-      const parsed = YAML.parse(yamlSource);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && "metadata" in parsed) {
-        return parsed.metadata as Record<string, unknown> | undefined;
-      }
-    } catch {
-      // ignore parse errors
-    }
-    return undefined;
-  }
-
-  function deriveLocalDiagramMetadata(
-    yamlSource: string,
-    fallbackName: string,
-    fallbackDescription: string
-  ): { name: string; description: string } {
-    const metadata = parseYamlMetadata(yamlSource);
-    const name = typeof metadata?.name === "string" && metadata.name.trim()
-      ? metadata.name.trim()
-      : typeof metadata?.element === "string" && metadata.element.trim()
-        ? metadata.element.trim()
-        : fallbackName;
-    const description = typeof metadata?.title === "string" ? metadata.title.trim() : "";
-    return { name, description: description || fallbackDescription };
-  }
-
-  function exampleDiagramSubtitle(yamlSource: string): string {
-    const metadata = parseYamlMetadata(yamlSource);
-    return typeof metadata?.title === "string" ? metadata.title.trim() : "";
-  }
-
-  function emptyDiagramTemplate(name: string): string {
-    return `metadata:
-  name: ${name}
-  title: Untitled Diagram
-
-states: {}
-
-transitions: []
-`;
   }
 
   async function openDirectOutput(svgSource: string): Promise<void> {
@@ -735,8 +631,8 @@ transitions: []
               on:click={() => loadExample(example.id)}
             >
               <div class="text-sm font-semibold">{example.name}</div>
-              {#if exampleDiagramSubtitle(example.yaml)}
-                <div class="mt-1 text-xs text-gray-500">{exampleDiagramSubtitle(example.yaml)}</div>
+              {#if example.description}
+                <div class="mt-1 text-xs text-gray-500">{example.description}</div>
               {/if}
             </button>
           {/each}

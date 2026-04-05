@@ -27,23 +27,22 @@ export function buildStateVisuals(
 
   for (const state of states) {
     const stateLayout = layout.states[state.id];
-    if (state.zeeman_parent) {
+    if (state.zeeman) {
       const sublevel = buildZeemanSublevelLabel(state, stateLayout, layout, theme);
       const visual: StateVisual = {
         state,
         layout: stateLayout,
         label: sublevel.label,
-        svg_label_text: sublevel.svg_label_text,
-        latex_label: sublevel.latex_label,
-        label_side: state.zeeman_label_position ?? "above"
+        label_text: sublevel.label_text,
+        latex_label: sublevel.latex_label
       };
-      const group = zeemanGroups.get(state.zeeman_parent);
+      const group = zeemanGroups.get(state.zeeman.parent_id);
       if (group && group.owner_id === state.id) {
-        const shared = buildSideStateLabel(state, group.bounds, transitions, layout, theme);
-        visual.shared_label = shared.label;
-        visual.shared_svg_label_text = shared.svg_label_text;
-        visual.shared_latex_label = shared.latex_label;
-        visual.shared_term_parts = shared.term_parts;
+        const manifold = buildSideStateLabel(state, group.bounds, transitions, layout, theme);
+        visual.manifold_label = manifold.label;
+        visual.manifold_label_text = manifold.label_text;
+        visual.manifold_latex_label = manifold.latex_label;
+        visual.manifold_term_parts = manifold.term_parts;
       }
       visuals[state.id] = visual;
       continue;
@@ -60,10 +59,9 @@ export function buildStateVisuals(
       state,
       layout: stateLayout,
       label: primary.label,
-      svg_label_text: primary.svg_label_text,
+      label_text: primary.label_text,
       latex_label: primary.latex_label,
-      term_parts: primary.term_parts,
-      label_side: primary.label_side
+      term_parts: primary.term_parts
     };
   }
 
@@ -77,14 +75,14 @@ export function collectStaticLabelBoxes(
 ): Array<[[number, number], number, number, number]> {
   const boxes: Array<[[number, number], number, number, number]> = [];
   Object.values(stateVisuals).forEach((visual) => {
-    pushLabelBoxes(boxes, visual.label, visual.svg_label_text, visual.latex_label, visual.term_parts, layout, theme);
-    if (visual.shared_label && visual.shared_svg_label_text) {
+    pushLabelBoxes(boxes, visual.label, visual.label_text, visual.latex_label, visual.term_parts, layout, theme);
+    if (visual.manifold_label && visual.manifold_label_text) {
       pushLabelBoxes(
         boxes,
-        visual.shared_label,
-        visual.shared_svg_label_text,
-        visual.shared_latex_label,
-        visual.shared_term_parts,
+        visual.manifold_label,
+        visual.manifold_label_text,
+        visual.manifold_latex_label,
+        visual.manifold_term_parts,
         layout,
         theme
       );
@@ -93,11 +91,13 @@ export function collectStaticLabelBoxes(
   return boxes;
 }
 
-export function termSymbolFragments(visual: StateVisual, layout: LayoutResult, theme: Theme): Array<LabelVisual & { role: string }> {
-  if (!visual.term_parts) {
-    return [{ ...visual.label, role: "main" }];
-  }
-  return termFragmentsForLabel(visual.label, visual.term_parts, layout, theme);
+export function termSymbolFragmentsForLabel(
+  label: LabelVisual,
+  termParts: TermSymbolParts,
+  layout: LayoutResult,
+  theme: Theme
+): Array<LabelVisual & { role: string }> {
+  return termFragmentsForLabel(label, termParts, layout, theme);
 }
 
 function buildSideStateLabel(
@@ -108,41 +108,41 @@ function buildSideStateLabel(
   theme: Theme
 ): {
   label: LabelVisual;
-  svg_label_text: string;
+  label_text: string;
   latex_label?: string;
   term_parts?: TermSymbolParts;
-  label_side: string;
+  label_side: StateSpec["label_side"];
 } {
-  const svgLabelText = levelLabelText(state);
+  const labelText = levelLabelText(state);
   const latexLabel = mjxLabelLatex(state);
   const termParts = buildTermParts(state);
   const labelFontSize = state.font_size ?? theme.state_font_size;
   const preferredSide = bounds.x_center <= (theme.layout_policy.axes_x_min + theme.layout_policy.axes_x_max) / 2 ? "left" : "right";
-  const labelSide = resolveStateLabelSide(state, preferredSide, transitions, layout, theme, bounds, svgLabelText, termParts, latexLabel, labelFontSize);
+  const labelSide = resolveStateLabelSide(state, preferredSide, transitions, layout, theme, bounds, labelText, termParts, latexLabel, labelFontSize);
   const gap = theme.layout_policy.state_label_gap;
-  const { leftExtent, rightExtent, useMathJax } = measureLabelExtents(svgLabelText, termParts, latexLabel, labelFontSize, layout, theme);
+  const { leftExtent, rightExtent, useMathJax } = measureLabelExtents(labelText, termParts, latexLabel, labelFontSize, layout, theme);
 
   const label: LabelVisual = labelSide === "left" || labelSide === "below-left"
     ? {
-        text: svgLabelText,
+        text: labelText,
         x: state.label_x ?? (bounds.x_left - gap - rightExtent + state.label_offset_x),
         y: state.label_y ?? (bounds.y + state.label_offset_y),
         ha: (termParts || useMathJax) ? "center" : "right",
-        va: "center",
+        va: state.label_va,
         fontSize: labelFontSize
       }
     : {
-        text: svgLabelText,
+        text: labelText,
         x: state.label_x ?? (bounds.x_right + gap + leftExtent + state.label_offset_x),
         y: state.label_y ?? (bounds.y + state.label_offset_y),
         ha: (termParts || useMathJax) ? "center" : "left",
-        va: "center",
+        va: state.label_va,
         fontSize: labelFontSize
       };
 
   return {
     label,
-    svg_label_text: svgLabelText,
+    label_text: labelText,
     latex_label: latexLabel,
     term_parts: termParts,
     label_side: labelSide
@@ -156,7 +156,7 @@ function buildZeemanSublevelLabel(
   theme: Theme
 ): {
   label: LabelVisual;
-  svg_label_text: string;
+  label_text: string;
   latex_label: string;
 } {
   const fontSize = theme.label_font_size;
@@ -164,8 +164,8 @@ function buildZeemanSublevelLabel(
     theme.layout_policy.state_label_clearance_padding * 0.55,
     estimateTextHeightAxes(fontSize, layout, theme) * 0.8
   );
-  const position = state.zeeman_label_position ?? "above";
-  const value = formatSignedMagneticQuantumNumber(state.magnetic_quantum_number ?? 0);
+  const position = state.zeeman?.label_position ?? "above";
+  const value = formatSignedMagneticQuantumNumber(state.zeeman?.magnetic_quantum_number ?? 0);
   return {
     label: {
       text: `m_J = ${value}`,
@@ -175,24 +175,24 @@ function buildZeemanSublevelLabel(
       va: position === "above" ? "bottom" : "top",
       fontSize
     },
-    svg_label_text: `m_J = ${value}`,
-    latex_label: `$m_{J}=${latexMagneticQuantumNumber(state.magnetic_quantum_number ?? 0)}$`
+    label_text: `m_J = ${value}`,
+    latex_label: `$m_{J}=${latexMagneticQuantumNumber(state.zeeman?.magnetic_quantum_number ?? 0)}$`
   };
 }
 
 function buildZeemanGroups(states: StateSpec[], layout: LayoutResult): Map<string, ZeemanGroup> {
   const grouped = new Map<string, StateSpec[]>();
   for (const state of states) {
-    if (!state.zeeman_parent) {
+    if (!state.zeeman) {
       continue;
     }
-    grouped.set(state.zeeman_parent, [...(grouped.get(state.zeeman_parent) ?? []), state]);
+    grouped.set(state.zeeman.parent_id, [...(grouped.get(state.zeeman.parent_id) ?? []), state]);
   }
 
   const groups = new Map<string, ZeemanGroup>();
   for (const [parentId, groupedStates] of grouped) {
     const ordered = [...groupedStates].sort((left, right) => {
-      const delta = (left.magnetic_quantum_number ?? 0) - (right.magnetic_quantum_number ?? 0);
+      const delta = (left.zeeman?.magnetic_quantum_number ?? 0) - (right.zeeman?.magnetic_quantum_number ?? 0);
       return Math.abs(delta) > 1e-9 ? delta : left.id.localeCompare(right.id, undefined, { numeric: true });
     });
     const layouts = ordered.map((state) => layout.states[state.id]);
@@ -303,7 +303,7 @@ function resolveStateLabelSide(
   termParts: TermSymbolParts | undefined,
   latexLabel: string | undefined,
   labelFontSize: number
-): string {
+): StateSpec["label_side"] {
   if (state.label_side !== "auto") {
     return state.label_side;
   }

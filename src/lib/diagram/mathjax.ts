@@ -48,10 +48,6 @@ export function ensureMathJax(): Promise<void> {
   return initPromise;
 }
 
-export function isMathJaxReady(): boolean {
-  return _convert !== null;
-}
-
 export function renderMathJaxSvg(latex: string): MathJaxLabelSvg | undefined {
   if (!_convert || !_childNodes || !_kind || !_outerHTML) return undefined;
   const normalized = normalizeLatex(latex);

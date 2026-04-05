@@ -64,9 +64,11 @@ export function computeLayout(spec: DiagramSpec, theme: Theme): LayoutResult {
 
   return {
     states: resultStates,
-    group_x_centers: xCenters,
+    column_x_centers: xCenters,
     fig_width: figWidth,
-    fig_height: figHeight
+    fig_height: figHeight,
+    energy_min: energyMin,
+    energy_max: energyMax
   };
 }
 
@@ -76,7 +78,7 @@ function stateLinesHorizontallyOverlap(left: HorizontalStateLayout, right: Horiz
   return left.x_left <= right.x_right && right.x_left <= left.x_right;
 }
 
-function resolveColumns(spec: DiagramSpec): ColumnSpec[] {
+export function resolveColumns(spec: DiagramSpec): ColumnSpec[] {
   if (spec.columns.length === 0) {
     return inferColumnsFromStates(spec.states);
   }
@@ -161,7 +163,7 @@ function adjustYPositionsForLabelClearance(
   const groups = new Map<string, StateSpec[]>();
 
   for (const state of states) {
-    if (state.zeeman_parent) {
+    if (state.zeeman) {
       continue;
     }
     const horizontal = horizontalLayouts[state.id];
@@ -211,13 +213,21 @@ function minimumLevelLabelGap(lower: StateSpec, upper: StateSpec, figWidth: numb
 }
 
 function estimatedLevelLabelHeight(state: StateSpec, figWidth: number, figHeight: number, theme: Theme): number {
+  const metricsLayout = {
+    fig_height: figHeight,
+    fig_width: figWidth,
+    states: {},
+    column_x_centers: {},
+    energy_min: 0,
+    energy_max: 1
+  };
   const fontSize = state.font_size ?? theme.state_font_size;
   if (buildTermParts(state)) {
-    const mainHeight = estimateTextHeightAxes(fontSize, { fig_height: figHeight, fig_width: figWidth, states: {}, group_x_centers: {} }, theme);
-    const scriptHeight = estimateTextHeightAxes(termScriptFontSize(theme, fontSize), { fig_height: figHeight, fig_width: figWidth, states: {}, group_x_centers: {} }, theme);
+    const mainHeight = estimateTextHeightAxes(fontSize, metricsLayout, theme);
+    const scriptHeight = estimateTextHeightAxes(termScriptFontSize(theme, fontSize), metricsLayout, theme);
     return mainHeight + scriptHeight * theme.layout_policy.term_height_script_scale;
   }
-  return estimateTextHeightAxes(fontSize, { fig_height: figHeight, fig_width: figWidth, states: {}, group_x_centers: {} }, theme);
+  return estimateTextHeightAxes(fontSize, metricsLayout, theme);
 }
 
 function labelsHorizontallyOverlap(
@@ -240,7 +250,7 @@ function estimatedLabelHorizontalBounds(
   figHeight: number,
   theme: Theme
 ): [number, number] {
-  const layout = { fig_height: figHeight, fig_width: figWidth, states: {}, group_x_centers: {} };
+  const layout = { fig_height: figHeight, fig_width: figWidth, states: {}, column_x_centers: {}, energy_min: 0, energy_max: 1 };
   const fontSize = state.font_size ?? theme.state_font_size;
   const parts = buildTermParts(state);
   const [leftExtent, rightExtent] = parts
@@ -267,7 +277,7 @@ function computeHorizontalStateLayouts(
   const grouped = new Map<string, StateSpec[]>();
   for (const state of states) {
     const columnId = resolveColumnId(state);
-    const key = state.zeeman_parent ? `${columnId}:${state.zeeman_parent}` : `${columnId}:${state.id}`;
+    const key = state.zeeman ? `${columnId}:${state.zeeman.parent_id}` : `${columnId}:${state.id}`;
     grouped.set(key, [...(grouped.get(key) ?? []), state]);
   }
 
@@ -279,14 +289,14 @@ function computeHorizontalStateLayouts(
     const fullStateWidth = theme.state_length * columnWidth;
     const zeemanLineFill = 0.95;
     const ordered = [...statesInGroup].sort((left, right) => {
-      const magneticDelta = (left.magnetic_quantum_number ?? 0) - (right.magnetic_quantum_number ?? 0);
+      const magneticDelta = (left.zeeman?.magnetic_quantum_number ?? 0) - (right.zeeman?.magnetic_quantum_number ?? 0);
       return Math.abs(magneticDelta) > 1e-9
         ? magneticDelta
         : left.id.localeCompare(right.id, undefined, { numeric: true });
     });
-    const zeemanGroup = ordered.length > 1 && ordered.some((state) => state.zeeman_parent);
+    const zeemanGroup = ordered.length > 1 && ordered.some((state) => state.zeeman);
     const slotWidth = zeemanGroup
-      ? fullStateWidth * (ordered[0].zeeman_width_scale ?? 0.25)
+      ? fullStateWidth * (ordered[0].zeeman?.width_scale ?? 0.25)
       : fullStateWidth;
     const lineWidth = zeemanGroup ? slotWidth * zeemanLineFill : slotWidth;
     const halfLine = lineWidth / 2;

@@ -33,6 +33,15 @@ export interface Style {
   mathjax_labels?: boolean;
 }
 
+export type ArrowMode = "none" | "single" | "double";
+
+export interface ZeemanSublevel {
+  parent_id: string;
+  magnetic_quantum_number: number;
+  width_scale: number;
+  label_position: "above" | "below";
+}
+
 export interface ColumnSpec {
   id: string;
   label?: string;
@@ -60,10 +69,7 @@ export interface StateSpec {
   label_offset_y: number;
   label_x?: number;
   label_y?: number;
-  magnetic_quantum_number?: number;
-  zeeman_parent?: string;
-  zeeman_width_scale?: number;
-  zeeman_label_position?: "above" | "below";
+  zeeman?: ZeemanSublevel;
 }
 
 export interface TransitionSpec {
@@ -78,9 +84,7 @@ export interface TransitionSpec {
   color?: string;
   label?: string;
   show_wavelength: boolean;
-  decay: boolean;
-  arrow: boolean;
-  arrow_both_ends: boolean;
+  arrows: ArrowMode;
   wavy: boolean;
   label_offset_x: number;
   label_offset_y: number;
@@ -132,7 +136,6 @@ export interface LayoutPolicy {
   axes_margin: number;
   group_min_column_width: number;
   state_overlap_threshold: number;
-  state_x_nudge_scale: number;
   figure_auto_height_min: number;
   figure_auto_height_energy_scale: number;
   figure_auto_width_per_group: number;
@@ -143,7 +146,6 @@ export interface LayoutPolicy {
   axis_tick_label_gap: number;
   axis_line_x_offset: number;
   state_label_gap: number;
-  energy_label_gap: number;
   state_label_clearance_padding: number;
   label_interference_gap: number;
   label_line_clearance: number;
@@ -178,8 +180,6 @@ export interface LayoutPolicy {
   transition_label_static_overlap_weight: number;
   transition_label_label_gap_weight: number;
   transition_label_static_gap_weight: number;
-  transition_label_gap_scale: number;
-  transition_label_above_pad_scale: number;
   arrowhead_length_scale: number;
   arrowhead_width_scale: number;
   svg_padding_min_px: number;
@@ -208,7 +208,6 @@ export interface Theme {
   footer_font_size: number;
   column_label_font_size: number;
   transition_font_size: number;
-  energy_label: string;
   show_energy_axis: boolean;
   show_energy_labels: boolean;
   show_column_labels: boolean;
@@ -227,9 +226,11 @@ export interface StateLayout {
 
 export interface LayoutResult {
   states: Record<string, StateLayout>;
-  group_x_centers: Record<string, number>;
+  column_x_centers: Record<string, number>;
   fig_width: number;
   fig_height: number;
+  energy_min: number;
+  energy_max: number;
 }
 
 export interface TermSymbolParts {
@@ -255,15 +256,13 @@ export interface StateVisual {
   state: StateSpec;
   layout: StateLayout;
   label: LabelVisual;
-  svg_label_text: string;
+  label_text: string;
   latex_label?: string;
   term_parts?: TermSymbolParts;
-  shared_label?: LabelVisual;
-  shared_svg_label_text?: string;
-  shared_latex_label?: string;
-  shared_term_parts?: TermSymbolParts;
-  energy_label?: LabelVisual;
-  label_side: string;
+  manifold_label?: LabelVisual;
+  manifold_label_text?: string;
+  manifold_latex_label?: string;
+  manifold_term_parts?: TermSymbolParts;
 }
 
 export interface TransitionVisual {
@@ -281,12 +280,22 @@ export interface TransitionVisual {
   lower_anchor: number;
 }
 
+export interface AxisTickVisual {
+  y: number;
+  label?: string;
+}
+
+export interface AxisVisual {
+  x: number;
+  ticks: AxisTickVisual[];
+  label?: LabelVisual;
+}
+
 export interface Scene {
   state_visuals: Record<string, StateVisual>;
   transition_visuals: TransitionVisual[];
-  group_labels: LabelVisual[];
-  axis_label?: LabelVisual;
-  axis_ticks: [number, string][];
+  column_labels: LabelVisual[];
+  energy_axis?: AxisVisual;
   title?: string;
   footer?: string;
 }

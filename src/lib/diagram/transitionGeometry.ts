@@ -1,14 +1,13 @@
 import { wavelengthToHex } from "./color";
-import { pointAlongPolyline, trimPolylineEndpoints } from "./polyline";
-import { normalizeTextAngle, optimizeTransitionLabelPositions, pointOnPolyline, polylineAngle, polylineEndpointAngle } from "./transitionLabels";
+import { trimPolylineEndpoints } from "./polyline";
+import { normalizeTextAngle, pointOnPolyline, polylineAngle, polylineEndpointAngle } from "./transitionLabels";
 import { anchorX, computeAutoTransitionAnchors, sameVisualColumn, type AnchorKey } from "./transitionLayout";
 import type { LabelVisual, LayoutResult, Theme, TransitionSpec, TransitionVisual } from "./types";
 
 export function buildTransitionVisuals(
   transitions: TransitionSpec[],
   layout: LayoutResult,
-  theme: Theme,
-  staticBoxes?: ReadonlyArray<[[number, number], number, number, number]>
+  theme: Theme
 ): TransitionVisual[] {
   const autoAnchors = computeAutoTransitionAnchors(
     transitions,
@@ -30,11 +29,7 @@ export function buildTransitionVisuals(
             start: [anchorX(upper, upperAnchor) + transition.start_x_offset, upper.y] as [number, number],
             end: [anchorX(lower, lowerAnchor) + transition.end_x_offset, lower.y] as [number, number]
           };
-      const rawPoints = transition.wavy
-        ? buildWavyPoints(start, end, theme.layout_policy)
-        : sameColumn
-          ? [start, end]
-          : [start, end];
+      const rawPoints = transition.wavy ? buildWavyPoints(start, end, theme.layout_policy) : [start, end];
       const endpointClearance = transition.endpoint_clearance ?? theme.endpoint_clearance;
       const points = trimPolylineEndpoints(rawPoints, endpointClearance, endpointClearance);
       const color = transition.color ?? wavelengthToHex(transition.wavelength_nm, theme.transition_color);
@@ -43,8 +38,8 @@ export function buildTransitionVisuals(
         index,
         points,
         label: buildTransitionLabel(transition, points),
-        start_marker: transition.arrow_both_ends,
-        end_marker: transition.arrow || transition.arrow_both_ends,
+        start_marker: transition.arrows === "double",
+        end_marker: transition.arrows !== "none",
         color,
         linewidth: transition.linewidth ?? theme.transition_linewidth,
         linestyle: transition.linestyle,
@@ -53,10 +48,6 @@ export function buildTransitionVisuals(
         lower_anchor: lowerAnchor
       } satisfies TransitionVisual;
     });
-
-  if (staticBoxes) {
-    optimizeTransitionLabelPositions(visuals, staticBoxes, layout, theme);
-  }
   return visuals;
 }
 
@@ -78,15 +69,13 @@ export function transitionPolylineForAnchors(
       };
   const rawPoints = transition.wavy
     ? buildWavyPoints(start, end, {
-      wavy_steps: 160,
-      wavy_cycles: 8,
-      wavy_amplitude: 0.012,
-      wavy_straight_fraction: 0.08,
-      wavy_ramp_fraction: 0.07
-    })
-    : sameColumn
-      ? [start, end]
-      : [start, end];
+        wavy_steps: 160,
+        wavy_cycles: 8,
+        wavy_amplitude: 0.012,
+        wavy_straight_fraction: 0.08,
+        wavy_ramp_fraction: 0.07
+      })
+    : [start, end];
   const endpointClearance = transition.endpoint_clearance ?? defaultEndpointClearance;
   return trimPolylineEndpoints(rawPoints, endpointClearance, endpointClearance);
 }

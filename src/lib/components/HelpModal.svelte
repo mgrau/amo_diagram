@@ -47,7 +47,7 @@
 
     <div class="min-h-0 flex-1 overflow-y-auto px-6 py-5">
       <div class="mb-6 rounded border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-        <code class="rounded bg-[#f5f0ff] px-1.5 py-0.5 font-semibold text-[#8b5cf6]">states:</code> is the primary schema. Example: <code class="rounded bg-[#ebfbef] px-1.5 py-0.5 text-[#2f855a]">states: {"{"} 1S0: {"{"} energy: 0 {"}"} {"}"}</code>
+        Top-level sections include <code class="rounded bg-[#f5f0ff] px-1.5 py-0.5 font-semibold text-[#8b5cf6]">metadata:</code>, <code class="rounded bg-[#f5f0ff] px-1.5 py-0.5 font-semibold text-[#8b5cf6]">style:</code>, <code class="rounded bg-[#f5f0ff] px-1.5 py-0.5 font-semibold text-[#8b5cf6]">layout:</code>, <code class="rounded bg-[#f5f0ff] px-1.5 py-0.5 font-semibold text-[#8b5cf6]">defaults:</code>, <code class="rounded bg-[#f5f0ff] px-1.5 py-0.5 font-semibold text-[#8b5cf6]">columns:</code>, <code class="rounded bg-[#f5f0ff] px-1.5 py-0.5 font-semibold text-[#8b5cf6]">states:</code>, and <code class="rounded bg-[#f5f0ff] px-1.5 py-0.5 font-semibold text-[#8b5cf6]">transitions:</code>. Example: <code class="rounded bg-[#ebfbef] px-1.5 py-0.5 text-[#2f855a]">states: {"{"} 1S0: {"{"} energy: 0 {"}"} {"}"}</code>
       </div>
 
       <div class="space-y-8">

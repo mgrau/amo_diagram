@@ -1,9 +1,8 @@
 import YAML from "yaml";
 import defaultsRaw from "./defaults.yaml?raw";
-import type { ColumnSpec, DiagramSpec, LayoutPolicyOverrides, StateSpec, Style, TransitionSpec } from "./types";
+import type { ArrowMode, ColumnSpec, DiagramSpec, LayoutPolicyOverrides, StateSpec, Style, TransitionSpec } from "./types";
 
 type JsonObject = Record<string, unknown>;
-type ArrowMode = "none" | "single" | "double";
 type ZeemanExpansion = {
   energyStep: number;
   values: number[];
@@ -38,7 +37,7 @@ export function parseDiagramYaml(source: string): DiagramSpec {
     }
   }
 
-  return {
+  const spec: DiagramSpec = {
     metadata: {
       name: stringOrUndefined(metadata.name),
       element: stringOrUndefined(metadata.element),
@@ -55,6 +54,8 @@ export function parseDiagramYaml(source: string): DiagramSpec {
     states,
     transitions
   };
+  assertNormalizedDiagramSpec(spec);
+  return spec;
 }
 
 function applyCollectionDefaults(raw: JsonObject): JsonObject {
@@ -145,9 +146,9 @@ function normalizeState(id: string, input: unknown): StateSpec[] {
     energy: numberOr(state.energy ?? state.energy_cm, 0),
     config: stringOrUndefined(state.config) ?? inferred.config,
     term: stringOrUndefined(state.term),
-    S: numberMaybe(state.S) ?? inferred.S ?? 0,
-    L: numberMaybe(state.L) ?? inferred.L ?? 0,
-    J: numberMaybe(state.J) ?? inferred.J ?? 0,
+    S: numberMaybe(state.S) ?? inferred.S,
+    L: numberMaybe(state.L) ?? inferred.L,
+    J: numberMaybe(state.J) ?? inferred.J,
     parity: stringOrUndefined(state.parity),
     column: stringOrNumberOrUndefined(state.column ?? state.group),
     y_position: numberMaybe(state.y_position),
@@ -200,8 +201,7 @@ function inferStateIdentity(id: string): { config?: string; S?: number; L?: numb
 
 function normalizeTransition(input: unknown): TransitionSpec {
   const transition = asObject(input, "transition");
-  const decay = booleanOr(transition.decay, false);
-  const arrowMode = resolveArrowMode(transition, decay);
+  const wavy = booleanOr(transition.decay, false) || booleanOr(transition.wavy, false);
   return {
     upper: stringOr(transition.upper, ""),
     lower: stringOr(transition.lower, ""),
@@ -214,10 +214,8 @@ function normalizeTransition(input: unknown): TransitionSpec {
     color: stringOrUndefined(transition.color),
     label: stringOrUndefined(transition.label),
     show_wavelength: booleanOr(transition.show_wavelength, false),
-    decay,
-    arrow: arrowMode !== "none",
-    arrow_both_ends: arrowMode === "double",
-    wavy: decay || booleanOr(transition.wavy, false),
+    arrows: resolveArrowMode(transition, wavy),
+    wavy,
     label_offset_x: numberOr(transition.label_offset_x, 0),
     label_offset_y: numberOr(transition.label_offset_y, 0),
     label_rotation: numberOr(transition.label_rotation, 0),
@@ -292,10 +290,12 @@ function expandZeemanState(state: StateSpec, zeeman: ZeemanExpansion): StateSpec
       id: zeemanStateId(state.id, magneticQuantumNumber),
       energy: state.energy + magneticQuantumNumber * zeeman.energyStep,
       y_position: undefined,
-      magnetic_quantum_number: magneticQuantumNumber,
-      zeeman_parent: state.id,
-      zeeman_width_scale: zeeman.widthScale,
-      zeeman_label_position: zeeman.labelPosition
+      zeeman: {
+        parent_id: state.id,
+        magnetic_quantum_number: magneticQuantumNumber,
+        width_scale: zeeman.widthScale,
+        label_position: zeeman.labelPosition
+      }
     };
   });
 }
@@ -316,8 +316,8 @@ function formatZeemanIdValue(value: number): string {
   return `${value > 0 ? "+" : ""}${value.toString().replace(".", "_")}`;
 }
 
-function resolveArrowMode(transition: JsonObject, decay: boolean): ArrowMode {
-  if (decay) {
+function resolveArrowMode(transition: JsonObject, wavy: boolean): ArrowMode {
+  if (booleanOr(transition.decay, false) && wavy) {
     return "single";
   }
   const explicit = asArrowMode(transition.arrows ?? transition.arrow_mode);
@@ -495,4 +495,26 @@ function asArrowMode(value: unknown): ArrowMode | undefined {
 
 function asArrowhead(value: unknown): "triangle" | "angle" | "stealth" | undefined {
   return value === "angle" || value === "stealth" || value === "triangle" ? value : undefined;
+}
+
+function assertNormalizedDiagramSpec(spec: DiagramSpec): void {
+  spec.states.forEach((state) => {
+    if (!Number.isFinite(state.energy)) {
+      throw new Error(`State ${state.id} has an invalid normalized energy value.`);
+    }
+    if (!state.zeeman) {
+      return;
+    }
+    if (!state.zeeman.parent_id) {
+      throw new Error(`Zeeman sublevel ${state.id} is missing its parent id.`);
+    }
+    if (!Number.isFinite(state.zeeman.magnetic_quantum_number)) {
+      throw new Error(`Zeeman sublevel ${state.id} has an invalid magnetic quantum number.`);
+    }
+  });
+  spec.transitions.forEach((transition) => {
+    if (transition.arrows !== "none" && transition.arrows !== "single" && transition.arrows !== "double") {
+      throw new Error(`Transition ${transition.upper} -> ${transition.lower} has an invalid normalized arrow mode.`);
+    }
+  });
 }

@@ -1,4 +1,4 @@
-import YAML from "yaml";
+import { deriveDiagramListMetadata } from "./diagramDocument";
 
 export interface ExampleDiagram {
   id: string;
@@ -22,27 +22,11 @@ function nameFromPath(path: string): string {
   return parts.map((p) => p[0].toUpperCase() + p.slice(1)).join(" ");
 }
 
-function descriptionFromYaml(content: string): string {
-  try {
-    const parsed = YAML.parse(content) as unknown;
-    if (parsed && typeof parsed === "object" && "metadata" in parsed) {
-      const metadata = (parsed as Record<string, unknown>).metadata;
-      if (metadata && typeof metadata === "object" && "title" in metadata) {
-        const title = (metadata as Record<string, unknown>).title;
-        if (typeof title === "string") return title;
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return "";
-}
-
 export const EXAMPLES: ExampleDiagram[] = Object.entries(rawFiles)
   .sort(([a], [b]) => a.localeCompare(b))
   .map(([path, content]) => ({
     id: idFromPath(path),
     name: nameFromPath(path),
-    description: descriptionFromYaml(content),
+    description: deriveDiagramListMetadata(content, "", "").description,
     yaml: content
   }));

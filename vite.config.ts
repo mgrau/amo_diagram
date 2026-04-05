@@ -1,15 +1,16 @@
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
+import packageJson from "./package.json";
 
 export default defineConfig({
   base: "./",
   plugins: [tailwindcss(), svelte()],
+  define: {
+    PACKAGE_VERSION: JSON.stringify(packageJson.version)
+  },
   worker: {
     format: "es"
-  },
-  define: {
-    PACKAGE_VERSION: JSON.stringify("3.2.1")
   },
   optimizeDeps: {
     include: [

@@ -86,10 +86,6 @@ export function sameVisualColumn(left: StateLayout, right: StateLayout): boolean
   return Math.abs(left.x_center - right.x_center) <= tolerance;
 }
 
-export function anchorFromX(state: StateLayout, x: number): number {
-  return (x - state.x_left) / Math.max(state.x_right - state.x_left, 1e-9);
-}
-
 export function clampAnchor(anchor: number, policy: Pick<LayoutPolicy, "axes_x_min" | "axes_x_max">): number {
   return Math.max(policy.axes_x_min, Math.min(policy.axes_x_max, anchor));
 }

@@ -1,6 +1,6 @@
-import { pointAlongPolyline, trimPolylineEndpoints } from "./polyline";
+import { trimPolylineEndpoints } from "./polyline";
 import { estimateTextBlockHeightAxes, estimateTextWidthAxes } from "./textMetrics";
-import { termSymbolFragments } from "./visuals";
+import { termSymbolFragmentsForLabel } from "./visuals";
 import { renderMathJaxSvg } from "./mathjax";
 import type { LayoutResult, Scene, Theme, TransitionVisual } from "./types";
 
@@ -40,6 +40,21 @@ export function sceneToSvg(scene: Scene, layout: LayoutResult, theme: Theme, sou
   const transitionGroups = scene.transition_visuals
     .map((visual) => renderTransition(visual, layout, theme, padding, plotWidth, plotTop, plotHeight, point))
     .join("\n");
+  const columnLabels = scene.column_labels
+    .map((label, index) => renderMathJaxOrText(
+      label.text,
+      scaleX(label.x, padding, plotWidth, theme),
+      scaleY(label.y, plotTop, plotHeight, theme),
+      label.fontSize ?? theme.column_label_font_size,
+      theme,
+      label.ha,
+      label.va,
+      `column-label column-label-${index}`
+    ))
+    .join("\n");
+  const energyAxis = scene.energy_axis
+    ? renderEnergyAxis(scene.energy_axis, layout, theme, padding, plotWidth, plotTop, plotHeight)
+    : "";
 
   const title = scene.title
     ? renderMathJaxOrText(scene.title, width / 2, 0, theme.title_font_size, theme, "center", "top", "diagram-title")
@@ -62,6 +77,8 @@ export function sceneToSvg(scene: Scene, layout: LayoutResult, theme: Theme, sou
     `  </style>`,
     `  <g class="diagram-root"${canvas.offsetX || canvas.offsetY ? ` transform="translate(${canvas.offsetX} ${canvas.offsetY})"` : ""}>`,
     title ? `    ${title}` : "",
+    energyAxis ? `    ${energyAxis}` : "",
+    columnLabels ? `    <g class="column-labels">\n${indentBlock(columnLabels, 3)}\n    </g>` : "",
     `    <g class="states">`,
     stateGroups,
     `    </g>`,
@@ -122,14 +139,14 @@ function measureSceneBounds(scene: Scene, layout: LayoutResult, theme: Theme, fr
   Object.values(scene.state_visuals).forEach((visual) => {
     includePoint(bounds, scaleX(visual.layout.x_left, frame.padding, frame.plotWidth, theme), scaleY(visual.layout.y, frame.plotTop, frame.plotHeight, theme), theme.state_linewidth / 2);
     includePoint(bounds, scaleX(visual.layout.x_right, frame.padding, frame.plotWidth, theme), scaleY(visual.layout.y, frame.plotTop, frame.plotHeight, theme), theme.state_linewidth / 2);
-    includeStructuredStateLabelBounds(bounds, visual.label, visual.svg_label_text, visual.latex_label, visual.term_parts, layout, theme, frame);
-    if (visual.shared_label && visual.shared_svg_label_text) {
+    includeStructuredStateLabelBounds(bounds, visual.label, visual.label_text, visual.latex_label, visual.term_parts, layout, theme, frame);
+    if (visual.manifold_label && visual.manifold_label_text) {
       includeStructuredStateLabelBounds(
         bounds,
-        visual.shared_label,
-        visual.shared_svg_label_text,
-        visual.shared_latex_label,
-        visual.shared_term_parts,
+        visual.manifold_label,
+        visual.manifold_label_text,
+        visual.manifold_latex_label,
+        visual.manifold_term_parts,
         layout,
         theme,
         frame
@@ -155,6 +172,35 @@ function measureSceneBounds(scene: Scene, layout: LayoutResult, theme: Theme, fr
       includeTextLabelBounds(bounds, visual.label, visual.label.text, visual.label.fontSize ?? theme.transition_font_size, layout, theme, frame, "plot");
     }
   });
+  scene.column_labels.forEach((label) => {
+    includeTextLabelBounds(bounds, label, label.text, label.fontSize ?? theme.column_label_font_size, layout, theme, frame, "plot");
+  });
+  if (scene.energy_axis) {
+    const axisX = scaleX(scene.energy_axis.x, frame.padding, frame.plotWidth, theme);
+    const axisTop = scaleY(theme.layout_policy.axes_y_max, frame.plotTop, frame.plotHeight, theme);
+    const axisBottom = scaleY(theme.layout_policy.axes_y_min, frame.plotTop, frame.plotHeight, theme);
+    includeRect(bounds, axisX - 1, Math.min(axisTop, axisBottom), axisX + 1, Math.max(axisTop, axisBottom));
+    scene.energy_axis.ticks.forEach((tick) => {
+      const tickY = scaleY(tick.y, frame.plotTop, frame.plotHeight, theme);
+      const tickEnd = scaleX(scene.energy_axis!.x + theme.layout_policy.axis_tick_extent, frame.padding, frame.plotWidth, theme);
+      includeRect(bounds, Math.min(axisX, tickEnd) - 1, tickY - 1, Math.max(axisX, tickEnd) + 1, tickY + 1);
+      if (tick.label) {
+        includeTextLabelBounds(
+          bounds,
+          { x: scene.energy_axis!.x - theme.layout_policy.axis_tick_label_gap, y: tick.y, ha: "right", va: "center" },
+          tick.label,
+          theme.label_font_size,
+          layout,
+          theme,
+          frame,
+          "plot"
+        );
+      }
+    });
+    if (scene.energy_axis.label) {
+      includeTextLabelBounds(bounds, scene.energy_axis.label, scene.energy_axis.label.text, scene.energy_axis.label.fontSize ?? theme.label_font_size, layout, theme, frame, "plot");
+    }
+  }
 
   if (scene.title) {
     includeHeaderFooterBounds(bounds, scene.title, frame.width / 2, 0, theme.title_font_size, theme, "center", "top", layout, frame);
@@ -193,15 +239,7 @@ function includeStructuredStateLabelBounds(
     }
   }
   if (termParts) {
-    termSymbolFragments({
-      state: {} as Scene["state_visuals"][string]["state"],
-      layout: {} as Scene["state_visuals"][string]["layout"],
-      label,
-      svg_label_text: svgLabelText,
-      latex_label: latexLabel,
-      term_parts: termParts,
-      label_side: "right"
-    }, layout, theme).forEach((fragment) => {
+    termSymbolFragmentsForLabel(label, termParts, layout, theme).forEach((fragment) => {
       includeTextLabelBounds(bounds, fragment, fragment.text, fragment.fontSize ?? theme.state_font_size, layout, theme, frame, "plot");
     });
     return;
@@ -346,7 +384,7 @@ function renderStateLabel(
 ): string {
   return renderStructuredStateLabel(
     visual.label,
-    visual.svg_label_text,
+    visual.label_text,
     visual.latex_label,
     visual.term_parts,
     layout,
@@ -367,14 +405,14 @@ function renderSharedStateLabel(
   plotTop: number,
   plotHeight: number
 ): string {
-  if (!visual.shared_label || !visual.shared_svg_label_text) {
+  if (!visual.manifold_label || !visual.manifold_label_text) {
     return "";
   }
   return renderStructuredStateLabel(
-    visual.shared_label,
-    visual.shared_svg_label_text,
-    visual.shared_latex_label,
-    visual.shared_term_parts,
+    visual.manifold_label,
+    visual.manifold_label_text,
+    visual.manifold_latex_label,
+    visual.manifold_term_parts,
     layout,
     theme,
     padding,
@@ -386,7 +424,7 @@ function renderSharedStateLabel(
 
 function renderStructuredStateLabel(
   label: Scene["state_visuals"][string]["label"],
-  svgLabelText: string,
+  labelText: string,
   latexLabel: string | undefined,
   termParts: Scene["state_visuals"][string]["term_parts"],
   layout: LayoutResult,
@@ -401,9 +439,9 @@ function renderStructuredStateLabel(
     if (mjxSvg) return mjxSvg;
   }
   return termParts
-    ? renderTermLabel(label, termParts, layout, theme, padding, plotWidth, plotTop, plotHeight, latexLabel)
+    ? renderTermLabel(label, labelText, termParts, layout, theme, padding, plotWidth, plotTop, plotHeight, latexLabel)
     : renderText(
-        svgLabelText,
+        labelText,
         scaleX(label.x, padding, plotWidth, theme),
         scaleY(label.y, plotTop, plotHeight, theme),
         label.fontSize ?? theme.state_font_size,
@@ -489,6 +527,62 @@ function renderTransition(
   ].filter(Boolean).join("\n");
 }
 
+function renderEnergyAxis(
+  axis: NonNullable<Scene["energy_axis"]>,
+  layout: LayoutResult,
+  theme: Theme,
+  padding: number,
+  plotWidth: number,
+  plotTop: number,
+  plotHeight: number
+): string {
+  const axisX = scaleX(axis.x, padding, plotWidth, theme);
+  const axisTop = scaleY(theme.layout_policy.axes_y_max, plotTop, plotHeight, theme);
+  const axisBottom = scaleY(theme.layout_policy.axes_y_min, plotTop, plotHeight, theme);
+  const tickLines = axis.ticks.map((tick) => {
+    const tickY = scaleY(tick.y, plotTop, plotHeight, theme);
+    const tickEnd = scaleX(axis.x + theme.layout_policy.axis_tick_extent, padding, plotWidth, theme);
+    const label = tick.label
+      ? renderText(
+          tick.label,
+          scaleX(axis.x - theme.layout_policy.axis_tick_label_gap, padding, plotWidth, theme),
+          tickY,
+          theme.label_font_size,
+          theme.font_family,
+          "right",
+          "center",
+          0,
+          "energy-axis-tick-label"
+        )
+      : "";
+    return [
+      `      <line class="energy-axis-tick" x1="${axisX}" y1="${tickY}" x2="${tickEnd}" y2="${tickY}" stroke="#172033" stroke-width="1" />`,
+      label ? `      ${label}` : ""
+    ].filter(Boolean).join("\n");
+  }).join("\n");
+  const label = axis.label
+    ? renderText(
+        axis.label.text,
+        scaleX(axis.label.x, padding, plotWidth, theme),
+        scaleY(axis.label.y, plotTop, plotHeight, theme),
+        axis.label.fontSize ?? theme.label_font_size,
+        theme.font_family,
+        axis.label.ha,
+        axis.label.va,
+        axis.label.rotation ?? 0,
+        "energy-axis-label"
+      )
+    : "";
+
+  return [
+    `    <g class="energy-axis">`,
+    `      <line class="energy-axis-line" x1="${axisX}" y1="${axisTop}" x2="${axisX}" y2="${axisBottom}" stroke="#172033" stroke-width="1.1" />`,
+    tickLines,
+    label ? `      ${label}` : "",
+    `    </g>`
+  ].filter(Boolean).join("\n");
+}
+
 function renderArrowhead(
   style: "triangle" | "angle" | "stealth",
   start: [number, number],
@@ -548,6 +642,7 @@ function arrowheadShaftInset(style: "triangle" | "angle" | "stealth", arrowLengt
 
 function renderTermLabel(
   label: Scene["state_visuals"][string]["label"],
+  labelText: string,
   termParts: NonNullable<Scene["state_visuals"][string]["term_parts"]>,
   layout: LayoutResult,
   theme: Theme,
@@ -557,21 +652,13 @@ function renderTermLabel(
   plotHeight: number,
   latexLabel?: string
 ): string {
-  const fragments = termSymbolFragments({
-    state: {} as Scene["state_visuals"][string]["state"],
-    layout: {} as Scene["state_visuals"][string]["layout"],
-    label,
-    svg_label_text: label.text,
-    term_parts: termParts,
-    label_side: "right",
-    latex_label: latexLabel
-  }, layout, theme);
+  const fragments = termSymbolFragmentsForLabel(label, termParts, layout, theme);
   const tspans = fragments.map((fragment) => {
     const className = `term-${fragment.role}`;
     return `<tspan class="${className}" x="${scaleX(fragment.x, padding, plotWidth, theme)}" y="${scaleY(fragment.y, plotTop, plotHeight, theme)}" font-size="${fragment.fontSize ?? (fragment.role === "main" || fragment.role === "prefix" ? theme.state_font_size : theme.state_font_size * theme.layout_policy.term_script_font_scale)}">${escape(fragment.text)}</tspan>`;
   }).join("");
   const latex = latexLabel ? ` data-latex="${escape(latexLabel)}"` : "";
-  return `<text class="state-label" font-family="${theme.font_family}" dominant-baseline="middle"${latex}>${tspans}</text>`;
+  return `<text class="state-label" aria-label="${escape(labelText)}" font-family="${theme.font_family}" dominant-baseline="middle"${latex}>${tspans}</text>`;
 }
 
 function renderMathJaxOrText(

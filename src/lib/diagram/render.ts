@@ -6,10 +6,7 @@ import { sceneToSvg } from "./svg";
 import type { DiagramSpec, Theme } from "./types";
 
 export interface RenderedDiagram {
-  spec: DiagramSpec;
-  theme: Theme;
-  layout: ReturnType<typeof computeLayout>;
-  scene: ReturnType<typeof buildScene>;
+  name?: string;
   svg: string;
 }
 
@@ -19,7 +16,10 @@ export function renderDiagram(source: string): RenderedDiagram {
   const layout = computeLayout(spec, theme);
   const scene = buildScene(spec, layout, theme);
   const svg = sceneToSvg(scene, layout, theme, source);
-  return { spec, theme, layout, scene, svg };
+  return {
+    name: spec.metadata.name ?? spec.metadata.element,
+    svg
+  };
 }
 
 function applyLayoutOverrides(theme: Theme, spec: DiagramSpec): Theme {
