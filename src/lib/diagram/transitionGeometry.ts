@@ -8,7 +8,7 @@ export function buildTransitionVisuals(
   transitions: TransitionSpec[],
   layout: LayoutResult,
   theme: Theme,
-  staticBoxes: ReadonlyArray<[[number, number], number, number, number]> = []
+  staticBoxes?: ReadonlyArray<[[number, number], number, number, number]>
 ): TransitionVisual[] {
   const autoAnchors = computeAutoTransitionAnchors(
     transitions,
@@ -49,7 +49,9 @@ export function buildTransitionVisuals(
       } satisfies TransitionVisual;
     });
 
-  optimizeTransitionLabelPositions(visuals, staticBoxes, layout, theme);
+  if (staticBoxes) {
+    optimizeTransitionLabelPositions(visuals, staticBoxes, layout, theme);
+  }
   return visuals;
 }
 
@@ -142,4 +144,3 @@ function buildWavyPoints(
 function anchorKey(index: number, side: "upper" | "lower"): AnchorKey {
   return `${index}:${side}`;
 }
-
