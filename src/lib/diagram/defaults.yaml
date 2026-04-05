@@ -35,8 +35,7 @@ defaults:
   transition:
     linestyle: solid
     show_wavelength: false
-    arrow: true
-    arrow_both_ends: false
+    arrows: double
     wavy: false
     label_offset_x: 0.0
     label_offset_y: 0.0

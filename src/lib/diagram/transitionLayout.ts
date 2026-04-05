@@ -79,6 +79,13 @@ export function anchorX(state: StateLayout, anchor: number): number {
   return state.x_left + anchor * (state.x_right - state.x_left);
 }
 
+export function sameVisualColumn(left: StateLayout, right: StateLayout): boolean {
+  const leftWidth = left.x_right - left.x_left;
+  const rightWidth = right.x_right - right.x_left;
+  const tolerance = Math.max(Math.min(leftWidth, rightWidth) * 0.02, 1e-6);
+  return Math.abs(left.x_center - right.x_center) <= tolerance;
+}
+
 export function anchorFromX(state: StateLayout, x: number): number {
   return (x - state.x_left) / Math.max(state.x_right - state.x_left, 1e-9);
 }
@@ -258,13 +265,13 @@ function parallelPenalty(anchors: Record<AnchorKey, number>, transitions: Transi
   transitions.forEach((transition, index) => {
     const upper = layout.states[transition.upper];
     const lower = layout.states[transition.lower];
-    if (transition.wavy || upper.column_id === lower.column_id) {
+    if (transition.wavy || sameVisualColumn(upper, lower)) {
       return;
     }
     const dx = anchorX(lower, anchors[anchorKey(index, "lower")]) - anchorX(upper, anchors[anchorKey(index, "upper")]);
     const dy = lower.y - upper.y;
     const angle = Math.atan2(dy, dx);
-    const bucketKey = `${upper.column_id}->${lower.column_id}`;
+    const bucketKey = `${visualColumnKey(upper)}->${visualColumnKey(lower)}`;
     buckets.set(bucketKey, [...(buckets.get(bucketKey) ?? []), angle]);
   });
   let penalty = 0;
@@ -322,4 +329,8 @@ function segmentsIntersect(a1: [number, number], a2: [number, number], b1: [numb
 
 function anchorKey(index: number, side: "upper" | "lower"): AnchorKey {
   return `${index}:${side}`;
+}
+
+function visualColumnKey(state: StateLayout): string {
+  return state.x_center.toFixed(4);
 }

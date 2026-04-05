@@ -1,7 +1,7 @@
 import { wavelengthToHex } from "./color";
 import { pointAlongPolyline, trimPolylineEndpoints } from "./polyline";
 import { normalizeTextAngle, optimizeTransitionLabelPositions, pointOnPolyline, polylineAngle } from "./transitionLabels";
-import { anchorX, computeAutoTransitionAnchors, type AnchorKey } from "./transitionLayout";
+import { anchorX, computeAutoTransitionAnchors, sameVisualColumn, type AnchorKey } from "./transitionLayout";
 import type { LabelVisual, LayoutResult, Theme, TransitionSpec, TransitionVisual } from "./types";
 
 export function buildTransitionVisuals(
@@ -27,7 +27,7 @@ export function buildTransitionVisuals(
       const end: [number, number] = [anchorX(lower, lowerAnchor) + transition.end_x_offset, lower.y];
       const rawPoints = transition.wavy
         ? buildWavyPoints(start, end, theme.layout_policy)
-        : upper.column_id === lower.column_id
+        : sameVisualColumn(upper, lower)
           ? buildArcPoints(start, end)
           : [start, end];
       const endpointClearance = transition.endpoint_clearance ?? theme.endpoint_clearance;
@@ -74,7 +74,7 @@ export function transitionPolylineForAnchors(
       wavy_straight_fraction: 0.08,
       wavy_ramp_fraction: 0.07
     })
-    : upper.column_id === lower.column_id
+    : sameVisualColumn(upper, lower)
       ? buildArcPoints(start, end)
       : [start, end];
   const endpointClearance = transition.endpoint_clearance ?? defaultEndpointClearance;
