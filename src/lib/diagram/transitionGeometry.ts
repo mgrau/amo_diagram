@@ -23,12 +23,17 @@ export function buildTransitionVisuals(
       const lower = layout.states[transition.lower];
       const upperAnchor = transition.upper_anchor ?? autoAnchors[anchorKey(index, "upper")];
       const lowerAnchor = transition.lower_anchor ?? autoAnchors[anchorKey(index, "lower")];
-      const start: [number, number] = [anchorX(upper, upperAnchor) + transition.start_x_offset, upper.y];
-      const end: [number, number] = [anchorX(lower, lowerAnchor) + transition.end_x_offset, lower.y];
+      const sameColumn = sameVisualColumn(upper, lower);
+      const { start, end } = sameColumn
+        ? alignedSameColumnEndpoints(upper, lower, upperAnchor, lowerAnchor, transition)
+        : {
+            start: [anchorX(upper, upperAnchor) + transition.start_x_offset, upper.y] as [number, number],
+            end: [anchorX(lower, lowerAnchor) + transition.end_x_offset, lower.y] as [number, number]
+          };
       const rawPoints = transition.wavy
         ? buildWavyPoints(start, end, theme.layout_policy)
-        : sameVisualColumn(upper, lower)
-          ? buildArcPoints(start, end)
+        : sameColumn
+          ? [start, end]
           : [start, end];
       const endpointClearance = transition.endpoint_clearance ?? theme.endpoint_clearance;
       const points = trimPolylineEndpoints(rawPoints, endpointClearance, endpointClearance);
@@ -64,8 +69,13 @@ export function transitionPolylineForAnchors(
 ): [number, number][] {
   const upper = layout.states[transition.upper];
   const lower = layout.states[transition.lower];
-  const start: [number, number] = [anchorX(upper, anchors[anchorKey(index, "upper")]) + transition.start_x_offset, upper.y];
-  const end: [number, number] = [anchorX(lower, anchors[anchorKey(index, "lower")]) + transition.end_x_offset, lower.y];
+  const sameColumn = sameVisualColumn(upper, lower);
+  const { start, end } = sameColumn
+    ? alignedSameColumnEndpoints(upper, lower, anchors[anchorKey(index, "upper")], anchors[anchorKey(index, "lower")], transition)
+    : {
+        start: [anchorX(upper, anchors[anchorKey(index, "upper")]) + transition.start_x_offset, upper.y] as [number, number],
+        end: [anchorX(lower, anchors[anchorKey(index, "lower")]) + transition.end_x_offset, lower.y] as [number, number]
+      };
   const rawPoints = transition.wavy
     ? buildWavyPoints(start, end, {
       wavy_steps: 160,
@@ -74,8 +84,8 @@ export function transitionPolylineForAnchors(
       wavy_straight_fraction: 0.08,
       wavy_ramp_fraction: 0.07
     })
-    : sameVisualColumn(upper, lower)
-      ? buildArcPoints(start, end)
+    : sameColumn
+      ? [start, end]
       : [start, end];
   const endpointClearance = transition.endpoint_clearance ?? defaultEndpointClearance;
   return trimPolylineEndpoints(rawPoints, endpointClearance, endpointClearance);
@@ -106,11 +116,6 @@ function buildTransitionLabel(transition: TransitionSpec, points: [number, numbe
 
 function formatWavelengthLabel(wavelengthNm: number): string {
   return `${Number.isInteger(wavelengthNm) ? wavelengthNm.toFixed(0) : wavelengthNm.toFixed(1)} nm`;
-}
-
-function buildArcPoints(start: [number, number], end: [number, number]): [number, number][] {
-  const midpoint: [number, number] = [(start[0] + end[0]) / 2, Math.max(start[1], end[1]) + Math.abs(start[0] - end[0]) * 0.35];
-  return [start, midpoint, end];
 }
 
 function buildWavyPoints(
@@ -146,4 +151,28 @@ function buildWavyPoints(
 
 function anchorKey(index: number, side: "upper" | "lower"): AnchorKey {
   return `${index}:${side}`;
+}
+
+function alignedSameColumnEndpoints(
+  upper: LayoutResult["states"][string],
+  lower: LayoutResult["states"][string],
+  upperAnchor: number,
+  lowerAnchor: number,
+  transition: Pick<TransitionSpec, "start_x_offset" | "end_x_offset">
+): { start: [number, number]; end: [number, number] } {
+  const upperX = anchorX(upper, upperAnchor) + transition.start_x_offset;
+  const lowerX = anchorX(lower, lowerAnchor) + transition.end_x_offset;
+  const overlapLeft = Math.max(upper.x_left + transition.start_x_offset, lower.x_left + transition.end_x_offset);
+  const overlapRight = Math.min(upper.x_right + transition.start_x_offset, lower.x_right + transition.end_x_offset);
+  if (overlapLeft <= overlapRight) {
+    const sharedX = Math.max(overlapLeft, Math.min(overlapRight, (upperX + lowerX) / 2));
+    return {
+      start: [sharedX, upper.y],
+      end: [sharedX, lower.y]
+    };
+  }
+  return {
+    start: [upperX, upper.y],
+    end: [lowerX, lower.y]
+  };
 }
