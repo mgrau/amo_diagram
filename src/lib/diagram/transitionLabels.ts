@@ -42,6 +42,15 @@ export function polylineAngle(points: [number, number][], t: number): number {
   return Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
 }
 
+export function polylineEndpointAngle(points: [number, number][]): number {
+  if (points.length < 2) {
+    return 0;
+  }
+  const [x1, y1] = points[0];
+  const [x2, y2] = points.at(-1)!;
+  return Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+}
+
 export function normalizeTextAngle(angle: number): number {
   let normalized = angle;
   while (normalized > 90) normalized -= 180;
@@ -71,7 +80,9 @@ export function optimizeTransitionLabelPositions(
       continue;
     }
     const base = pointOnPolyline(visual.points, visual.transition.label_position);
-    const transitionAngle = polylineAngle(visual.points, visual.transition.label_position);
+    const transitionAngle = visual.transition.wavy
+      ? polylineEndpointAngle(visual.points)
+      : polylineAngle(visual.points, visual.transition.label_position);
     const angle = visual.transition.alignment === "horizontal" ? 0 : normalizeTextAngle(transitionAngle);
     const fontSize = visual.label.fontSize ?? theme.transition_font_size;
     const width = estimateTextWidthAxes(visual.label.text, fontSize, layout, theme);

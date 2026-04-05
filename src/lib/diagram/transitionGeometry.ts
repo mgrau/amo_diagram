@@ -1,6 +1,6 @@
 import { wavelengthToHex } from "./color";
 import { pointAlongPolyline, trimPolylineEndpoints } from "./polyline";
-import { normalizeTextAngle, optimizeTransitionLabelPositions, pointOnPolyline, polylineAngle } from "./transitionLabels";
+import { normalizeTextAngle, optimizeTransitionLabelPositions, pointOnPolyline, polylineAngle, polylineEndpointAngle } from "./transitionLabels";
 import { anchorX, computeAutoTransitionAnchors, sameVisualColumn, type AnchorKey } from "./transitionLayout";
 import type { LabelVisual, LayoutResult, Theme, TransitionSpec, TransitionVisual } from "./types";
 
@@ -88,7 +88,10 @@ function buildTransitionLabel(transition: TransitionSpec, points: [number, numbe
     .join("\n");
   if (!text) return undefined;
   const [x, y] = pointOnPolyline(points, transition.label_position);
-  const angle = transition.alignment === "horizontal" ? 0 : normalizeTextAngle(polylineAngle(points, transition.label_position));
+  const transitionAngle = transition.wavy
+    ? polylineEndpointAngle(points)
+    : polylineAngle(points, transition.label_position);
+  const angle = transition.alignment === "horizontal" ? 0 : normalizeTextAngle(transitionAngle);
   return {
     text,
     x: transition.label_x ?? x,
