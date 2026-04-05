@@ -15,12 +15,15 @@ export function formatJ(value: number | undefined): string | undefined {
 
 export function buildTermParts(state: StateSpec): TermSymbolParts | undefined {
   if (state.term) {
-    const parsed = parseLatexTerm(state.term ?? state.label ?? state.id);
+    const parsed = parseLatexTerm(state.term);
     if (parsed) {
       return parsed;
     }
+    if (state.label) {
+      return undefined;
+    }
     return {
-      main_text: state.term ?? state.label ?? state.id
+      main_text: state.term ?? state.id
     };
   }
   if (state.label) {

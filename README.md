@@ -2,6 +2,13 @@
 
 Browser-based level-diagram editor and renderer.
 
+Recent additions include:
+
+- `decay` transitions for lower-state-only wavy arrows
+- `arrows: single|double|none` transition controls
+- global `style.font_size` plus local `font_size` overrides on states and transitions
+- Zeeman sublevel expansion from a compact state definition
+
 ## Stack
 
 - `Vite` for static builds and GitHub Pages deployment

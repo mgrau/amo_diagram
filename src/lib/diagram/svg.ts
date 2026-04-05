@@ -147,8 +147,8 @@ function renderTransition(
   const element = shaftPoints.length === 2
     ? `<line class="transition-line" x1="${scaleX(shaftPoints[0][0], padding, plotWidth, theme)}" y1="${scaleY(shaftPoints[0][1], plotTop, plotHeight, theme)}" x2="${scaleX(shaftPoints[1][0], padding, plotWidth, theme)}" y2="${scaleY(shaftPoints[1][1], plotTop, plotHeight, theme)}" stroke="${visual.color}" stroke-width="${visual.linewidth}" />`
     : `<polyline class="transition-line" points="${shaftPoints.map(pointFormatter).join(" ")}" stroke="${visual.color}" stroke-width="${visual.linewidth}" fill="none" />`;
-  const startArrow = visual.start_marker ? renderArrowhead(visual.arrowhead, visual.points[1], visual.points[0], visual.color, layout, theme, padding, plotWidth, plotTop, plotHeight) : "";
-  const endArrow = visual.end_marker ? renderArrowhead(visual.arrowhead, visual.points.at(-2)!, visual.points.at(-1)!, visual.color, layout, theme, padding, plotWidth, plotTop, plotHeight) : "";
+  const startArrow = visual.start_marker ? renderArrowhead(visual.arrowhead, visual.points[1], visual.points[0], visual.color, visual.linewidth, layout, theme, padding, plotWidth, plotTop, plotHeight) : "";
+  const endArrow = visual.end_marker ? renderArrowhead(visual.arrowhead, visual.points.at(-2)!, visual.points.at(-1)!, visual.color, visual.linewidth, layout, theme, padding, plotWidth, plotTop, plotHeight) : "";
   const label = visual.label
     ? renderText(
         visual.label.text,
@@ -178,6 +178,7 @@ function renderArrowhead(
   start: [number, number],
   end: [number, number],
   color: string,
+  linewidth: number,
   layout: LayoutResult,
   theme: Theme,
   padding: number,
@@ -201,7 +202,7 @@ function renderArrowhead(
     const anglePoints = [left, end, right]
       .map(([x, y]) => `${scaleX(x, padding, plotWidth, theme)},${scaleY(y, plotTop, plotHeight, theme)}`)
       .join(" ");
-    return `<polyline class="transition-arrowhead transition-arrowhead-angle" points="${anglePoints}" fill="none" stroke="${color}" stroke-width="${theme.transition_linewidth}" stroke-linecap="butt" stroke-linejoin="miter" />`;
+    return `<polyline class="transition-arrowhead transition-arrowhead-angle" points="${anglePoints}" fill="none" stroke="${color}" stroke-width="${linewidth}" stroke-linecap="butt" stroke-linejoin="miter" />`;
   }
   if (style === "stealth") {
     const notch: [number, number] = [end[0] - ux * arrowLength * 0.56, end[1] - uy * arrowLength * 0.56];

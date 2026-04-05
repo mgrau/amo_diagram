@@ -34,19 +34,20 @@ function applyLayoutOverrides(theme: Theme, spec: DiagramSpec): Theme {
 }
 
 function applyStyle(theme: Theme, spec: DiagramSpec): Theme {
+  const baseFontSize = spec.style.font_size;
   return {
     ...theme,
     arrowhead: spec.style.arrowhead ?? theme.arrowhead,
     endpoint_clearance: spec.style.endpoint_clearance ?? theme.endpoint_clearance,
     state_linewidth: spec.style.state_linewidth ?? theme.state_linewidth,
     state_length: spec.style.state_length ?? theme.state_length,
-    state_font_size: spec.style.state_font_size ?? theme.state_font_size,
-    label_font_size: spec.style.label_font_size ?? theme.label_font_size,
-    title_font_size: spec.style.title_font_size ?? theme.title_font_size,
-    footer_font_size: spec.style.footer_font_size ?? theme.footer_font_size,
-    column_label_font_size: spec.style.column_label_font_size ?? theme.column_label_font_size,
+    state_font_size: spec.style.state_font_size ?? baseFontSize ?? theme.state_font_size,
+    label_font_size: spec.style.label_font_size ?? baseFontSize ?? theme.label_font_size,
+    title_font_size: spec.style.title_font_size ?? baseFontSize ?? theme.title_font_size,
+    footer_font_size: spec.style.footer_font_size ?? baseFontSize ?? theme.footer_font_size,
+    column_label_font_size: spec.style.column_label_font_size ?? baseFontSize ?? theme.column_label_font_size,
     transition_linewidth: spec.style.transition_linewidth ?? theme.transition_linewidth,
-    transition_font_size: spec.style.transition_font_size ?? theme.transition_font_size,
+    transition_font_size: spec.style.transition_font_size ?? baseFontSize ?? theme.transition_font_size,
     arrowsize: spec.style.arrowsize ?? theme.arrowsize,
     font_family: spec.style.font_family ?? theme.font_family,
     show_energy_axis: spec.style.show_energy_axis ?? theme.show_energy_axis,

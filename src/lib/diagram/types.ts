@@ -13,6 +13,7 @@ export interface Style {
   theme: string;
   figure_width?: number;
   figure_height?: number;
+  font_size?: number;
   arrowhead?: "triangle" | "angle" | "stealth";
   endpoint_clearance?: number;
   state_linewidth?: number;
@@ -59,6 +60,8 @@ export interface StateSpec {
   label_offset_y: number;
   label_x?: number;
   label_y?: number;
+  magnetic_quantum_number?: number;
+  zeeman_parent?: string;
 }
 
 export interface TransitionSpec {
@@ -73,6 +76,7 @@ export interface TransitionSpec {
   color?: string;
   label?: string;
   show_wavelength: boolean;
+  decay: boolean;
   arrow: boolean;
   arrow_both_ends: boolean;
   wavy: boolean;

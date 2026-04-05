@@ -1,8 +1,14 @@
 import YAML from "yaml";
 import defaultsRaw from "./defaults.yaml?raw";
+import { formatJ, levelLabelLatex, levelLabelText } from "./termSymbols";
 import type { ColumnSpec, DiagramSpec, LayoutPolicyOverrides, StateSpec, Style, TransitionSpec } from "./types";
 
 type JsonObject = Record<string, unknown>;
+type ArrowMode = "none" | "single" | "double";
+type ZeemanExpansion = {
+  step: number;
+  values: number[];
+};
 
 const builtInDefaults = YAML.parse(defaultsRaw) as JsonObject;
 
@@ -19,7 +25,7 @@ export function parseDiagramYaml(source: string): DiagramSpec {
   const style = objectAt(merged, "style");
   const layout = objectAt(merged, "layout");
   const columns = arrayAt(merged, "columns", "groups").map(normalizeColumn);
-  const states = stateEntriesAt(merged, "states").map(([id, state]) =>
+  const states = stateEntriesAt(merged, "states").flatMap(([id, state]) =>
     normalizeState(id, mergeItemDefaults(state, collectionDefaults.state))
   );
   const transitions = arrayAt(merged, "transitions").map(normalizeTransition);
@@ -78,6 +84,7 @@ function applyCollectionDefaults(raw: JsonObject): JsonObject {
 function normalizeStyle(input: JsonObject): Style {
   return {
     theme: stringOr(input.theme, "default"),
+    font_size: numberMaybe(input.font_size),
     arrowhead: asArrowhead(input.arrowhead),
     endpoint_clearance: numberMaybe(input.endpoint_clearance),
     figure_width: numberMaybe(input.figure_width),
@@ -128,10 +135,10 @@ function normalizeColumn(input: unknown): ColumnSpec {
   };
 }
 
-function normalizeState(id: string, input: unknown): StateSpec {
+function normalizeState(id: string, input: unknown): StateSpec[] {
   const state = asObject(input, "state");
   const inferred = inferStateIdentity(id);
-  return {
+  const normalized: StateSpec = {
     id,
     label: stringOrUndefined(state.label),
     energy: numberOr(state.energy ?? state.energy_cm, 0),
@@ -151,6 +158,8 @@ function normalizeState(id: string, input: unknown): StateSpec {
     label_x: numberMaybe(state.label_x),
     label_y: numberMaybe(state.label_y)
   };
+  const zeeman = normalizeZeeman(state.zeeman, normalized);
+  return zeeman ? expandZeemanState(normalized, zeeman) : [normalized];
 }
 
 function inferStateIdentity(id: string): { config?: string; S?: number; L?: number; J?: number } {
@@ -190,6 +199,8 @@ function inferStateIdentity(id: string): { config?: string; S?: number; L?: numb
 
 function normalizeTransition(input: unknown): TransitionSpec {
   const transition = asObject(input, "transition");
+  const decay = booleanOr(transition.decay, false);
+  const arrowMode = resolveArrowMode(transition, decay);
   return {
     upper: stringOr(transition.upper, ""),
     lower: stringOr(transition.lower, ""),
@@ -202,9 +213,10 @@ function normalizeTransition(input: unknown): TransitionSpec {
     color: stringOrUndefined(transition.color),
     label: stringOrUndefined(transition.label),
     show_wavelength: booleanOr(transition.show_wavelength, false),
-    arrow: booleanOr(transition.arrow, true),
-    arrow_both_ends: booleanOr(transition.arrow_both_ends, false),
-    wavy: booleanOr(transition.wavy, false),
+    decay,
+    arrow: arrowMode !== "none",
+    arrow_both_ends: arrowMode === "double",
+    wavy: decay || booleanOr(transition.wavy, false),
     label_offset_x: numberOr(transition.label_offset_x, 0),
     label_offset_y: numberOr(transition.label_offset_y, 0),
     label_rotation: numberOr(transition.label_rotation, 0),
@@ -222,6 +234,122 @@ function normalizeTransition(input: unknown): TransitionSpec {
     label_y: numberMaybe(transition.label_y),
     alignment: transition.alignment === "horizontal" || transition.label_orientation === "horizontal" ? "horizontal" : "transition"
   };
+}
+
+function normalizeZeeman(value: unknown, state: StateSpec): ZeemanExpansion | undefined {
+  if (value === undefined || value === false) {
+    return undefined;
+  }
+
+  if (typeof value === "number") {
+    return {
+      step: value,
+      values: inferZeemanValues(state)
+    };
+  }
+
+  if (value === true) {
+    return {
+      step: 0,
+      values: inferZeemanValues(state)
+    };
+  }
+
+  const zeeman = asObject(value, `zeeman expansion for state ${state.id}`);
+  const values = numberArrayMaybe(zeeman.values) ?? inferZeemanValues(state);
+  return {
+    step: numberMaybe(zeeman.step ?? zeeman.spacing) ?? 0,
+    values: [...values].sort((left, right) => left - right)
+  };
+}
+
+function inferZeemanValues(state: StateSpec): number[] {
+  if (state.J === undefined) {
+    throw new Error(`State ${state.id} uses zeeman expansion but does not define J or explicit zeeman.values.`);
+  }
+  const doubled = Math.round(state.J * 2);
+  if (Math.abs(state.J * 2 - doubled) > 1e-9) {
+    throw new Error(`State ${state.id} has a non-half-integer J value that cannot be expanded into Zeeman sublevels.`);
+  }
+  const values: number[] = [];
+  for (let current = -doubled; current <= doubled; current += 2) {
+    values.push(current / 2);
+  }
+  return values;
+}
+
+function expandZeemanState(state: StateSpec, zeeman: ZeemanExpansion): StateSpec[] {
+  const baseLabel = levelLabelText(state);
+  const baseLatex = levelLabelLatex(state);
+  return zeeman.values.map((magneticQuantumNumber) => {
+    const suffix = `m_J = ${formatSignedQuantumNumber(magneticQuantumNumber)}`;
+    return {
+      ...state,
+      id: zeemanStateId(state.id, magneticQuantumNumber),
+      label: `${baseLabel}\n${suffix}`,
+      term: baseLatex ? appendZeemanLatex(baseLatex, magneticQuantumNumber) : undefined,
+      energy: state.energy + magneticQuantumNumber * zeeman.step,
+      y_position: undefined,
+      magnetic_quantum_number: magneticQuantumNumber,
+      zeeman_parent: state.id
+    };
+  });
+}
+
+function appendZeemanLatex(baseLatex: string, magneticQuantumNumber: number): string {
+  const body = baseLatex.startsWith("$") && baseLatex.endsWith("$")
+    ? baseLatex.slice(1, -1)
+    : baseLatex;
+  return `$${body}\\;\\left(m_{J}=${latexQuantumNumber(magneticQuantumNumber)}\\right)$`;
+}
+
+function zeemanStateId(baseId: string, magneticQuantumNumber: number): string {
+  return `${baseId}@m${formatZeemanIdValue(magneticQuantumNumber)}`;
+}
+
+function formatZeemanIdValue(value: number): string {
+  const doubled = Math.round(value * 2);
+  if (Math.abs(value * 2 - doubled) <= 1e-9) {
+    if (doubled % 2 === 0) {
+      const integer = doubled / 2;
+      return integer > 0 ? `+${integer}` : `${integer}`;
+    }
+    return `${doubled > 0 ? "+" : ""}${doubled}_2`;
+  }
+  return `${value > 0 ? "+" : ""}${value.toString().replace(".", "_")}`;
+}
+
+function formatSignedQuantumNumber(value: number): string {
+  const formatted = formatJ(value) ?? value.toString();
+  return value > 0 ? `+${formatted}` : formatted;
+}
+
+function latexQuantumNumber(value: number): string {
+  const doubled = Math.round(value * 2);
+  if (Math.abs(value * 2 - doubled) > 1e-9) {
+    return value.toString();
+  }
+  if (doubled % 2 === 0) {
+    return `${doubled / 2}`;
+  }
+  return doubled < 0 ? `-\\frac{${Math.abs(doubled)}}{2}` : `\\frac{${doubled}}{2}`;
+}
+
+function resolveArrowMode(transition: JsonObject, decay: boolean): ArrowMode {
+  if (decay) {
+    return "single";
+  }
+  const explicit = asArrowMode(transition.arrows ?? transition.arrow_mode);
+  if (explicit) {
+    return explicit;
+  }
+  if (transition.arrow_both_ends === true) {
+    return "double";
+  }
+  if (transition.arrow === false) {
+    return "none";
+  }
+  return booleanOr(transition.arrow, true) ? "single" : "none";
 }
 
 function deepMerge(base: JsonObject, override: JsonObject): JsonObject {
@@ -349,6 +477,14 @@ function booleanOr(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
+function numberArrayMaybe(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const numbers = value.filter((entry): entry is number => typeof entry === "number");
+  return numbers.length === value.length ? numbers : undefined;
+}
+
 function asHa(value: unknown): "left" | "center" | "right" {
   return value === "left" || value === "right" ? value : "center";
 }
@@ -363,6 +499,10 @@ function asLabelVa(value: unknown): "top" | "center" | "bottom" {
 
 function asTransitionPosition(value: unknown): "transition" | "left" | "right" | "auto" {
   return value === "transition" || value === "left" || value === "right" ? value : "auto";
+}
+
+function asArrowMode(value: unknown): ArrowMode | undefined {
+  return value === "none" || value === "single" || value === "double" ? value : undefined;
 }
 
 function asArrowhead(value: unknown): "triangle" | "angle" | "stealth" | undefined {

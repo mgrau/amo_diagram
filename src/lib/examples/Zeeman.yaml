@@ -1,0 +1,40 @@
+metadata:
+  name: Zeeman
+  title: Zeeman Sublevels
+
+style:
+  font_size: 13
+  figure_width: 5.5
+
+states:
+  2S1/2:
+    energy: 0.0
+    J: 0.5
+    zeeman:
+      step: 0.35
+  2P3/2:
+    energy: 4.0
+    J: 1.5
+    zeeman:
+      step: 0.25
+
+transitions:
+  - upper: "2P3/2@m-3_2"
+    lower: "2S1/2@m-1_2"
+    label: sigma-
+    arrows: single
+  - upper: "2P3/2@m-1_2"
+    lower: "2S1/2@m-1_2"
+    label: pi
+    arrows: double
+    color: "#2563eb"
+  - upper: "2P3/2@m+1_2"
+    lower: "2S1/2@m-1_2"
+    label: sigma+
+    arrows: single
+    color: "#0f766e"
+  - upper: "2P3/2@m+3_2"
+    lower: "2S1/2@m+1_2"
+    label: decay
+    decay: true
+    color: "#6b7280"
