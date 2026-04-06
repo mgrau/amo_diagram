@@ -2,32 +2,18 @@ import { trimPolylineEndpoints } from "./polyline";
 import { estimateTextBlockHeightAxes, estimateTextWidthAxes } from "./textMetrics";
 import { termSymbolFragmentsForLabel } from "./visuals";
 import { renderMathJaxSvg } from "./mathjax";
-import type { LayoutResult, Scene, Theme, TransitionVisual } from "./types";
+import type { DiagramInteractionModel, LayoutResult, Scene, Theme, TransitionVisual } from "./types";
 
 export function sceneToSvg(scene: Scene, layout: LayoutResult, theme: Theme, sourceYaml = ""): string {
-  const width = Math.round(layout.fig_width * 96);
-  const height = Math.round(layout.fig_height * 96);
-  const padding = Math.max(theme.layout_policy.svg_padding_min_px, Math.min(width, height) * theme.layout_policy.svg_padding_fraction);
-  const topMargin = Math.max(12, Math.round(padding * 0.45));
-  const bottomMargin = Math.max(12, Math.round(padding * 0.45));
-  const titleGap = scene.title ? Math.max(18, Math.round(theme.title_font_size * 0.75)) : 0;
-  const titleBlockHeight = scene.title ? Math.round(theme.title_font_size * 1.1) + titleGap : 0;
-  const footerGap = scene.footer ? Math.max(10, Math.round(theme.footer_font_size * 0.35)) : 0;
-  const footerBlockHeight = scene.footer
-    ? Math.round(theme.footer_font_size * 1.1) + footerGap
-    : 0;
-  const plotTop = topMargin + titleBlockHeight;
-  const plotWidth = width - padding * 2;
-  const plotHeight = Math.max(1, height - plotTop - bottomMargin - footerBlockHeight);
-  const frame: SvgFrame = { width, height, padding, plotWidth, plotHeight, plotTop, bottomMargin };
+  const { frame, canvas } = buildSvgViewport(scene, layout, theme);
 
-  const point = ([x, y]: [number, number]) => `${scaleX(x, padding, plotWidth, theme)} ${scaleY(y, plotTop, plotHeight, theme)}`;
+  const point = ([x, y]: [number, number]) => `${scaleX(x, frame.padding, frame.plotWidth, theme)} ${scaleY(y, frame.plotTop, frame.plotHeight, theme)}`;
   const linecap = "butt";
 
   const stateGroups = Object.values(scene.state_visuals).map((visual) => {
-    const stateLine = `<line class="state-line" x1="${scaleX(visual.layout.x_left, padding, plotWidth, theme)}" y1="${scaleY(visual.layout.y, plotTop, plotHeight, theme)}" x2="${scaleX(visual.layout.x_right, padding, plotWidth, theme)}" y2="${scaleY(visual.layout.y, plotTop, plotHeight, theme)}" stroke="${theme.state_color}" stroke-width="${theme.state_linewidth}" stroke-linecap="${linecap}" />`;
-    const label = renderStateLabel(visual, layout, theme, padding, plotWidth, plotTop, plotHeight);
-    const sharedLabel = renderSharedStateLabel(visual, layout, theme, padding, plotWidth, plotTop, plotHeight);
+    const stateLine = `<line class="state-line" x1="${scaleX(visual.layout.x_left, frame.padding, frame.plotWidth, theme)}" y1="${scaleY(visual.layout.y, frame.plotTop, frame.plotHeight, theme)}" x2="${scaleX(visual.layout.x_right, frame.padding, frame.plotWidth, theme)}" y2="${scaleY(visual.layout.y, frame.plotTop, frame.plotHeight, theme)}" stroke="${theme.state_color}" stroke-width="${theme.state_linewidth}" stroke-linecap="${linecap}" />`;
+    const label = renderStateLabel(visual, layout, theme, frame.padding, frame.plotWidth, frame.plotTop, frame.plotHeight);
+    const sharedLabel = renderSharedStateLabel(visual, layout, theme, frame.padding, frame.plotWidth, frame.plotTop, frame.plotHeight);
     return [
       `    <g class="state" id="${safeId(visual.state.id)}">`,
       `      ${stateLine}`,
@@ -38,13 +24,13 @@ export function sceneToSvg(scene: Scene, layout: LayoutResult, theme: Theme, sou
   }).join("\n");
 
   const transitionGroups = scene.transition_visuals
-    .map((visual) => renderTransition(visual, layout, theme, padding, plotWidth, plotTop, plotHeight, point))
+    .map((visual) => renderTransition(visual, layout, theme, frame.padding, frame.plotWidth, frame.plotTop, frame.plotHeight, point))
     .join("\n");
   const columnLabels = scene.column_labels
     .map((label, index) => renderMathJaxOrText(
       label.text,
-      scaleX(label.x, padding, plotWidth, theme),
-      scaleY(label.y, plotTop, plotHeight, theme),
+      scaleX(label.x, frame.padding, frame.plotWidth, theme),
+      scaleY(label.y, frame.plotTop, frame.plotHeight, theme),
       label.fontSize ?? theme.column_label_font_size,
       theme,
       label.ha,
@@ -53,20 +39,19 @@ export function sceneToSvg(scene: Scene, layout: LayoutResult, theme: Theme, sou
     ))
     .join("\n");
   const energyAxis = scene.energy_axis
-    ? renderEnergyAxis(scene.energy_axis, layout, theme, padding, plotWidth, plotTop, plotHeight)
+    ? renderEnergyAxis(scene.energy_axis, layout, theme, frame.padding, frame.plotWidth, frame.plotTop, frame.plotHeight)
     : "";
 
   const title = scene.title
-    ? renderMathJaxOrText(scene.title, width / 2, 0, theme.title_font_size, theme, "center", "top", "diagram-title")
+    ? renderMathJaxOrText(scene.title, frame.width / 2, 0, theme.title_font_size, theme, "center", "top", "diagram-title")
     : "";
   const footer = scene.footer
-    ? renderMathJaxOrText(scene.footer, width / 2, height - bottomMargin, theme.footer_font_size, theme, "center", "bottom", "diagram-footer")
+    ? renderMathJaxOrText(scene.footer, frame.width / 2, frame.height - frame.bottomMargin, theme.footer_font_size, theme, "center", "bottom", "diagram-footer")
     : "";
-  const canvas = expandCanvasToFit(scene, layout, theme, frame);
 
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${canvas.width} ${canvas.height}" width="${canvas.width}" height="${canvas.height}">`,
+    `<svg class="diagram-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${canvas.width} ${canvas.height}" width="${canvas.width}" height="${canvas.height}">`,
     indentBlock(renderMetadata(sourceYaml), 1),
     `  <style>`,
     `    text { fill: #172033; }`,
@@ -91,6 +76,84 @@ export function sceneToSvg(scene: Scene, layout: LayoutResult, theme: Theme, sou
   ].filter(Boolean).join("\n");
 }
 
+export function buildSvgInteractionModel(scene: Scene, layout: LayoutResult, theme: Theme): DiagramInteractionModel {
+  const { frame, canvas } = buildSvgViewport(scene, layout, theme);
+  return {
+    width: canvas.width,
+    height: canvas.height,
+    font_family: theme.font_family,
+    plot: {
+      left: canvas.offsetX + frame.padding,
+      top: canvas.offsetY + frame.plotTop,
+      width: frame.plotWidth,
+      height: frame.plotHeight,
+      axes_x_min: theme.layout_policy.axes_x_min,
+      axes_x_max: theme.layout_policy.axes_x_max,
+      axes_y_min: theme.layout_policy.axes_y_min,
+      axes_y_max: theme.layout_policy.axes_y_max
+    },
+    transitions: scene.transition_visuals.map((visual) => {
+      const upperState = layout.states[visual.transition.upper];
+      const lowerState = layout.states[visual.transition.lower];
+      const upperStateLine = {
+        x1: canvas.offsetX + scaleX(upperState.x_left, frame.padding, frame.plotWidth, theme),
+        x2: canvas.offsetX + scaleX(upperState.x_right, frame.padding, frame.plotWidth, theme),
+        y: canvas.offsetY + scaleY(upperState.y, frame.plotTop, frame.plotHeight, theme)
+      };
+      const lowerStateLine = {
+        x1: canvas.offsetX + scaleX(lowerState.x_left, frame.padding, frame.plotWidth, theme),
+        x2: canvas.offsetX + scaleX(lowerState.x_right, frame.padding, frame.plotWidth, theme),
+        y: canvas.offsetY + scaleY(lowerState.y, frame.plotTop, frame.plotHeight, theme)
+      };
+      const upperHandleX = upperState.x_left + visual.upper_anchor * (upperState.x_right - upperState.x_left);
+      const lowerHandleX = lowerState.x_left + visual.lower_anchor * (lowerState.x_right - lowerState.x_left);
+      return {
+        index: visual.index,
+        upper_state_id: visual.transition.upper,
+        lower_state_id: visual.transition.lower,
+        points: visual.points.map(([x, y]) => [
+          canvas.offsetX + scaleX(x, frame.padding, frame.plotWidth, theme),
+          canvas.offsetY + scaleY(y, frame.plotTop, frame.plotHeight, theme)
+        ] as [number, number]),
+        color: visual.color,
+        linewidth: visual.linewidth,
+        arrowhead: visual.arrowhead,
+        arrowsize: visual.arrowsize,
+        start_marker: visual.start_marker,
+        end_marker: visual.end_marker,
+        label: visual.label ? {
+          text: visual.label.text,
+          x: canvas.offsetX + scaleX(visual.label.x, frame.padding, frame.plotWidth, theme),
+          y: canvas.offsetY + scaleY(visual.label.y, frame.plotTop, frame.plotHeight, theme),
+          plot_x: visual.label.x,
+          plot_y: visual.label.y,
+          width: estimateTextWidthPx(visual.label.text, visual.label.fontSize ?? theme.transition_font_size, layout, theme),
+          height: estimateTextBlockHeightPx(visual.label.text, visual.label.fontSize ?? theme.transition_font_size, layout, theme),
+          rotation: visual.label.rotation ?? 0,
+          font_size: visual.label.fontSize ?? theme.transition_font_size,
+          ha: visual.label.ha,
+          va: visual.label.va,
+          fontstyle: visual.label.fontstyle
+        } : undefined,
+        upper: {
+          state_id: visual.transition.upper,
+          anchor: visual.upper_anchor,
+          handle_x: canvas.offsetX + scaleX(upperHandleX, frame.padding, frame.plotWidth, theme),
+          handle_y: upperStateLine.y,
+          state_line: upperStateLine
+        },
+        lower: {
+          state_id: visual.transition.lower,
+          anchor: visual.lower_anchor,
+          handle_x: canvas.offsetX + scaleX(lowerHandleX, frame.padding, frame.plotWidth, theme),
+          handle_y: lowerStateLine.y,
+          state_line: lowerStateLine
+        }
+      };
+    })
+  };
+}
+
 type SvgFrame = {
   width: number;
   height: number;
@@ -101,6 +164,13 @@ type SvgFrame = {
   bottomMargin: number;
 };
 
+type SvgCanvas = {
+  width: number;
+  height: number;
+  offsetX: number;
+  offsetY: number;
+};
+
 type PixelBounds = {
   minX: number;
   minY: number;
@@ -108,12 +178,32 @@ type PixelBounds = {
   maxY: number;
 };
 
-function expandCanvasToFit(scene: Scene, layout: LayoutResult, theme: Theme, frame: SvgFrame): {
-  width: number;
-  height: number;
-  offsetX: number;
-  offsetY: number;
+function buildSvgViewport(scene: Scene, layout: LayoutResult, theme: Theme): {
+  frame: SvgFrame;
+  canvas: SvgCanvas;
 } {
+  const width = Math.round(layout.fig_width * 96);
+  const height = Math.round(layout.fig_height * 96);
+  const padding = Math.max(theme.layout_policy.svg_padding_min_px, Math.min(width, height) * theme.layout_policy.svg_padding_fraction);
+  const topMargin = Math.max(12, Math.round(padding * 0.45));
+  const bottomMargin = Math.max(12, Math.round(padding * 0.45));
+  const titleGap = scene.title ? Math.max(18, Math.round(theme.title_font_size * 0.75)) : 0;
+  const titleBlockHeight = scene.title ? Math.round(theme.title_font_size * 1.1) + titleGap : 0;
+  const footerGap = scene.footer ? Math.max(10, Math.round(theme.footer_font_size * 0.35)) : 0;
+  const footerBlockHeight = scene.footer
+    ? Math.round(theme.footer_font_size * 1.1) + footerGap
+    : 0;
+  const plotTop = topMargin + titleBlockHeight;
+  const plotWidth = width - padding * 2;
+  const plotHeight = Math.max(1, height - plotTop - bottomMargin - footerBlockHeight);
+  const frame: SvgFrame = { width, height, padding, plotWidth, plotHeight, plotTop, bottomMargin };
+  return {
+    frame,
+    canvas: expandCanvasToFit(scene, layout, theme, frame)
+  };
+}
+
+function expandCanvasToFit(scene: Scene, layout: LayoutResult, theme: Theme, frame: SvgFrame): SvgCanvas {
   const bounds = measureSceneBounds(scene, layout, theme, frame);
   const edgePadding = 6;
   const overflowLeft = Math.max(0, edgePadding - bounds.minX);
@@ -159,12 +249,12 @@ function measureSceneBounds(scene: Scene, layout: LayoutResult, theme: Theme, fr
       includePoint(bounds, scaleX(x, frame.padding, frame.plotWidth, theme), scaleY(y, frame.plotTop, frame.plotHeight, theme), visual.linewidth / 2);
     });
     if (visual.start_marker) {
-      arrowheadVertices(visual.points[1], visual.points[0], theme, visual.arrowhead).forEach(([x, y]) => {
+      arrowheadVertices(visual.points[1], visual.points[0], visual.arrowsize, theme, visual.arrowhead).forEach(([x, y]) => {
         includePoint(bounds, scaleX(x, frame.padding, frame.plotWidth, theme), scaleY(y, frame.plotTop, frame.plotHeight, theme), visual.linewidth / 2);
       });
     }
     if (visual.end_marker) {
-      arrowheadVertices(visual.points.at(-2)!, visual.points.at(-1)!, theme, visual.arrowhead).forEach(([x, y]) => {
+      arrowheadVertices(visual.points.at(-2)!, visual.points.at(-1)!, visual.arrowsize, theme, visual.arrowhead).forEach(([x, y]) => {
         includePoint(bounds, scaleX(x, frame.padding, frame.plotWidth, theme), scaleY(y, frame.plotTop, frame.plotHeight, theme), visual.linewidth / 2);
       });
     }
@@ -326,6 +416,7 @@ function includeRotatedRect(
 function arrowheadVertices(
   start: [number, number],
   end: [number, number],
+  arrowsize: number,
   theme: Theme,
   style: "triangle" | "angle" | "stealth"
 ): Array<[number, number]> {
@@ -336,7 +427,7 @@ function arrowheadVertices(
   const uy = dy / Math.max(length, 1e-9);
   const nx = -uy;
   const ny = ux;
-  const arrowLength = theme.arrowsize * theme.layout_policy.arrowhead_length_scale;
+  const arrowLength = arrowsize * theme.layout_policy.arrowhead_length_scale;
   const arrowWidth = arrowLength * theme.layout_policy.arrowhead_width_scale;
   const base: [number, number] = [end[0] - ux * arrowLength, end[1] - uy * arrowLength];
   const left: [number, number] = [base[0] + nx * arrowWidth, base[1] + ny * arrowWidth];
@@ -491,7 +582,7 @@ function renderTransition(
   plotHeight: number,
   pointFormatter: (point: [number, number]) => string
 ): string {
-  const arrowLength = theme.arrowsize * theme.layout_policy.arrowhead_length_scale;
+  const arrowLength = visual.arrowsize * theme.layout_policy.arrowhead_length_scale;
   const shaftInset = arrowheadShaftInset(visual.arrowhead, arrowLength);
   const shaftPoints = trimPolylineEndpoints(
     visual.points,
@@ -501,8 +592,8 @@ function renderTransition(
   const element = shaftPoints.length === 2
     ? `<line class="transition-line" x1="${scaleX(shaftPoints[0][0], padding, plotWidth, theme)}" y1="${scaleY(shaftPoints[0][1], plotTop, plotHeight, theme)}" x2="${scaleX(shaftPoints[1][0], padding, plotWidth, theme)}" y2="${scaleY(shaftPoints[1][1], plotTop, plotHeight, theme)}" stroke="${visual.color}" stroke-width="${visual.linewidth}" />`
     : `<polyline class="transition-line" points="${shaftPoints.map(pointFormatter).join(" ")}" stroke="${visual.color}" stroke-width="${visual.linewidth}" fill="none" />`;
-  const startArrow = visual.start_marker ? renderArrowhead(visual.arrowhead, visual.points[1], visual.points[0], visual.color, visual.linewidth, layout, theme, padding, plotWidth, plotTop, plotHeight) : "";
-  const endArrow = visual.end_marker ? renderArrowhead(visual.arrowhead, visual.points.at(-2)!, visual.points.at(-1)!, visual.color, visual.linewidth, layout, theme, padding, plotWidth, plotTop, plotHeight) : "";
+  const startArrow = visual.start_marker ? renderArrowhead(visual.arrowhead, visual.points[1], visual.points[0], visual.color, visual.linewidth, visual.arrowsize, layout, theme, padding, plotWidth, plotTop, plotHeight) : "";
+  const endArrow = visual.end_marker ? renderArrowhead(visual.arrowhead, visual.points.at(-2)!, visual.points.at(-1)!, visual.color, visual.linewidth, visual.arrowsize, layout, theme, padding, plotWidth, plotTop, plotHeight) : "";
   const label = visual.label
     ? renderText(
         visual.label.text,
@@ -589,6 +680,7 @@ function renderArrowhead(
   end: [number, number],
   color: string,
   linewidth: number,
+  arrowsize: number,
   layout: LayoutResult,
   theme: Theme,
   padding: number,
@@ -603,7 +695,7 @@ function renderArrowhead(
   const uy = dy / Math.max(length, 1e-9);
   const nx = -uy;
   const ny = ux;
-  const arrowLength = theme.arrowsize * theme.layout_policy.arrowhead_length_scale;
+  const arrowLength = arrowsize * theme.layout_policy.arrowhead_length_scale;
   const arrowWidth = arrowLength * theme.layout_policy.arrowhead_width_scale;
   const base: [number, number] = [end[0] - ux * arrowLength, end[1] - uy * arrowLength];
   const left: [number, number] = [base[0] + nx * arrowWidth, base[1] + ny * arrowWidth];

@@ -206,6 +206,7 @@ function normalizeTransition(input: unknown): TransitionSpec {
     upper: stringOr(transition.upper, ""),
     lower: stringOr(transition.lower, ""),
     arrowhead: asArrowhead(transition.arrowhead),
+    arrowsize: numberMaybe(transition.arrowsize),
     endpoint_clearance: numberMaybe(transition.endpoint_clearance),
     wavelength_nm: numberMaybe(transition.wavelength_nm),
     einstein_A: numberMaybe(transition.einstein_A),

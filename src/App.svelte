@@ -3,6 +3,7 @@
   import YAML from "yaml";
   import CodeEditor from "./lib/components/CodeEditor.svelte";
   import HelpModal from "./lib/components/HelpModal.svelte";
+  import InteractivePreview from "./lib/components/InteractivePreview.svelte";
   import { deriveDiagramListMetadata, emptyDiagramTemplate } from "./lib/diagramDocument";
   import type { RenderedDiagram } from "./lib/diagram/render";
   import { createPdfBlob, createPngBlob, createSvgBlob, downloadPdf, downloadPng, downloadSvg, embedEditorLinkInSvg, extractYamlFromSvg } from "./lib/diagram/export";
@@ -147,7 +148,7 @@
   }
 
   async function exportPdf(): Promise<void> {
-    const svg = previewHost?.querySelector("svg");
+    const svg = previewHost?.querySelector("svg.diagram-svg");
     if (svg instanceof SVGSVGElement) {
       await downloadPdf(exportFilename("pdf"), svg);
     }
@@ -800,22 +801,13 @@
           </div>
         </div>
         <div class="min-h-0 flex-1 overflow-auto bg-gray-50 p-4" bind:this={previewHost}>
-          {#if error}
-            <div class="rounded border border-red-300 bg-red-50 p-4 text-sm text-red-600">
-              {error}
-            </div>
-          {/if}
-          {#if rendered}
-            <div class="flex min-h-full items-start justify-center">
-              <div class="rounded-sm border border-gray-300 bg-white">
-                {@html rendered.svg}
-              </div>
-            </div>
-          {:else if isRendering}
-            <div class="rounded border border-blue-200 bg-blue-50 p-4 text-sm text-[#003057]">
-              Rendering preview…
-            </div>
-          {/if}
+          <InteractivePreview
+            {rendered}
+            {error}
+            {isRendering}
+            {yamlText}
+            onChange={(value, immediate = false) => handleSourceChange(value, immediate)}
+          />
         </div>
       </section>
     </div>

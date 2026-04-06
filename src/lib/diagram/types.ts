@@ -76,6 +76,7 @@ export interface TransitionSpec {
   upper: string;
   lower: string;
   arrowhead?: "triangle" | "angle" | "stealth";
+  arrowsize?: number;
   endpoint_clearance?: number;
   wavelength_nm?: number;
   einstein_A?: number;
@@ -276,6 +277,7 @@ export interface TransitionVisual {
   linewidth: number;
   linestyle: string;
   arrowhead: "triangle" | "angle" | "stealth";
+  arrowsize: number;
   upper_anchor: number;
   lower_anchor: number;
 }
@@ -298,4 +300,68 @@ export interface Scene {
   energy_axis?: AxisVisual;
   title?: string;
   footer?: string;
+}
+
+export interface TransitionStateLineInteraction {
+  x1: number;
+  x2: number;
+  y: number;
+}
+
+export interface TransitionEndpointInteraction {
+  state_id: string;
+  anchor: number;
+  handle_x: number;
+  handle_y: number;
+  state_line: TransitionStateLineInteraction;
+}
+
+export interface LabelInteraction {
+  text: string;
+  x: number;
+  y: number;
+  plot_x: number;
+  plot_y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  font_size: number;
+  ha: "left" | "center" | "right";
+  va: "top" | "center" | "bottom";
+  fontstyle?: string;
+}
+
+export interface TransitionInteraction {
+  index: number;
+  upper_state_id: string;
+  lower_state_id: string;
+  points: [number, number][];
+  color: string;
+  linewidth: number;
+  arrowhead: "triangle" | "angle" | "stealth";
+  arrowsize: number;
+  start_marker: boolean;
+  end_marker: boolean;
+  label?: LabelInteraction;
+  upper: TransitionEndpointInteraction;
+  lower: TransitionEndpointInteraction;
+}
+
+export interface PlotInteraction {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  axes_x_min: number;
+  axes_x_max: number;
+  axes_y_min: number;
+  axes_y_max: number;
+}
+
+export interface DiagramInteractionModel {
+  width: number;
+  height: number;
+  font_family: string;
+  plot: PlotInteraction;
+  transitions: TransitionInteraction[];
 }

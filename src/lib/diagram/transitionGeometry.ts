@@ -44,6 +44,7 @@ export function buildTransitionVisuals(
         linewidth: transition.linewidth ?? theme.transition_linewidth,
         linestyle: transition.linestyle,
         arrowhead: transition.arrowhead ?? theme.arrowhead,
+        arrowsize: transition.arrowsize ?? theme.arrowsize,
         upper_anchor: upperAnchor,
         lower_anchor: lowerAnchor
       } satisfies TransitionVisual;

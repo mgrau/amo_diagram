@@ -139,6 +139,7 @@ export const SCHEMA_SECTION_DEFINITIONS: SchemaSectionDefinition[] = [
       { name: "einstein_A", type: "number", description: "Optional transition-rate metadata." },
       { name: "linestyle", type: "string", description: "Stroke style. Current renderer treats all transitions as solid." },
       { name: "arrowhead", type: "triangle | angle | stealth", description: "Local arrowhead override.", enumValues: ["triangle", "angle", "stealth"] },
+      { name: "arrowsize", type: "number", description: "Local arrowhead size override." },
       { name: "linewidth", type: "number", description: "Local transition stroke-width override." },
       { name: "endpoint_clearance", type: "number", description: "Local endpoint gap override." },
       { name: "color", type: "string", description: "Explicit stroke color. If omitted, color is inferred from wavelength." },

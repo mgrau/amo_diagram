@@ -2,12 +2,13 @@ import { computeLayout } from "./layout";
 import { parseDiagramYaml } from "./load";
 import { DEFAULT_THEME } from "./policy";
 import { buildScene } from "./scene";
-import { sceneToSvg } from "./svg";
-import type { DiagramSpec, Theme } from "./types";
+import { buildSvgInteractionModel, sceneToSvg } from "./svg";
+import type { DiagramInteractionModel, DiagramSpec, Theme } from "./types";
 
 export interface RenderedDiagram {
   name?: string;
   svg: string;
+  interaction: DiagramInteractionModel;
 }
 
 export function renderDiagram(source: string): RenderedDiagram {
@@ -16,9 +17,11 @@ export function renderDiagram(source: string): RenderedDiagram {
   const layout = computeLayout(spec, theme);
   const scene = buildScene(spec, layout, theme);
   const svg = sceneToSvg(scene, layout, theme, source);
+  const interaction = buildSvgInteractionModel(scene, layout, theme);
   return {
     name: spec.metadata.name ?? spec.metadata.element,
-    svg
+    svg,
+    interaction
   };
 }
 
