@@ -39,6 +39,7 @@
   let shareMessage = "";
   let outputMode: SharedDiagramOutput = "editor";
   let directOutputStarted = false;
+  let isMobileLayout = false;
   const SHARE_TARGETS: Array<{ id: SharedDiagramOutput; label: string }> = [
     { id: "editor", label: "Editor" },
     { id: "svg", label: "SVG" },
@@ -394,6 +395,13 @@
 
   onMount(() => {
     let disposed = false;
+    const mobileQuery = window.matchMedia("(max-width: 767px)");
+    const updateMobileLayout = (): void => {
+      isMobileLayout = mobileQuery.matches;
+    };
+
+    updateMobileLayout();
+    mobileQuery.addEventListener("change", updateMobileLayout);
 
     try {
       renderWorker = new Worker(new URL("./lib/diagram/renderWorker.ts", import.meta.url), { type: "module" });
@@ -429,6 +437,7 @@
       if (pendingShareMessageTimer !== undefined) {
         clearTimeout(pendingShareMessageTimer);
       }
+      mobileQuery.removeEventListener("change", updateMobileLayout);
       renderWorker?.terminate();
     };
   });
@@ -523,36 +532,39 @@
   </div>
 {:else}
 <div class="flex h-screen flex-col bg-gray-50">
-  <header class="flex items-center justify-between bg-[#003057] px-4 py-3 text-white shadow">
+  <header class="flex items-center justify-between bg-[#003057] px-3 py-2 text-white shadow md:px-4 md:py-3">
     <div class="flex items-center gap-3">
       <button
-        class="rounded border border-blue-400 px-3 py-2 text-blue-200 hover:border-blue-200 hover:text-white"
+        class="rounded border border-blue-400 px-2.5 py-1.5 text-blue-200 hover:border-blue-200 hover:text-white md:px-3 md:py-2"
         aria-label="Open examples menu"
         on:click={() => (menuOpen = !menuOpen)}
       >
-        <span class="block h-0.5 w-5 bg-current"></span>
-        <span class="mt-1 block h-0.5 w-5 bg-current"></span>
-        <span class="mt-1 block h-0.5 w-5 bg-current"></span>
+        <span class="block h-0.5 w-4 bg-current md:w-5"></span>
+        <span class="mt-1 block h-0.5 w-4 bg-current md:w-5"></span>
+        <span class="mt-1 block h-0.5 w-4 bg-current md:w-5"></span>
       </button>
-      <div class="text-lg font-bold tracking-wide">AMO Diagram Studio</div>
+      <div class="text-base font-bold tracking-wide md:text-lg">AMO Diagram Studio</div>
     </div>
   </header>
 
-  <div class="relative min-h-0 flex-1 overflow-hidden p-4 md:p-6">
+  <div class="relative min-h-0 flex-1 overflow-hidden p-2.5 md:p-6">
     <HelpModal open={helpOpen} onClose={() => (helpOpen = false)} />
 
     {#if menuOpen}
       <button
-        class="absolute bottom-0 right-0 z-20 bg-slate-900/10"
-        style:left="17rem"
+        class={`absolute inset-0 z-20 bg-slate-900/10 ${isMobileLayout ? "" : "left-[17rem]"}`}
         aria-label="Close menu"
         on:click={() => (menuOpen = false)}
       ></button>
     {/if}
 
-    <aside class={`panel drawer-shadow absolute left-0 top-0 z-30 flex h-full w-[17rem] flex-col border-r border-gray-200 p-4 transition-transform duration-200 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
-      <div class="mb-5">
-        <h1 class="text-xl font-bold text-gray-800">AMO Diagram Studio</h1>
+    <aside class={`panel drawer-shadow absolute z-30 flex flex-col overflow-hidden transition-transform duration-200 ${
+      isMobileLayout
+        ? `${menuOpen ? "translate-y-0" : "-translate-y-full"} inset-x-0 top-0 max-h-[calc(100%-0.5rem)] w-full rounded-b-lg border-b border-gray-200 p-3`
+        : `${menuOpen ? "translate-x-0" : "-translate-x-full"} left-0 top-0 h-full w-[17rem] rounded-lg border-r border-gray-200 p-4`
+    }`}>
+      <div class="mb-4 md:mb-5">
+        <h1 class="text-lg font-bold text-gray-800 md:text-xl">AMO Diagram Studio</h1>
       </div>
 
       <input
@@ -643,20 +655,20 @@
     </aside>
 
     <div
-      class="grid h-full min-h-0 grid-cols-1 gap-4 transition-[padding-left] duration-200 md:grid-cols-2"
-      style:padding-left={menuOpen ? "17rem" : "0"}
+      class="grid h-full min-h-0 grid-cols-1 grid-rows-[minmax(18rem,1.35fr)_minmax(12rem,0.8fr)] gap-2.5 transition-[padding-left] duration-200 md:grid-cols-2 md:grid-rows-1 md:gap-4"
+      style:padding-left={menuOpen && !isMobileLayout ? "17rem" : "0"}
     >
-      <section class="panel flex h-full min-h-0 flex-col rounded-lg overflow-hidden">
-        <div class="border-b border-gray-200 px-5 py-4">
+      <section class="panel order-2 flex min-h-0 flex-col overflow-hidden rounded-lg md:order-1">
+        <div class="border-b border-gray-200 px-2.5 py-2 sm:px-3 sm:py-2.5 md:px-5 md:py-4">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <div class="text-sm font-semibold text-gray-800">{selectedDiagram.name}</div>
+              <div class="text-xs font-semibold text-gray-800 sm:text-sm">{selectedDiagram.name}</div>
               {#if selectedDiagram.description}
-                <div class="mt-1 text-xs text-gray-500">{selectedDiagram.description}</div>
+                <div class="mt-0.5 text-[11px] text-gray-500 sm:mt-1 sm:text-xs">{selectedDiagram.description}</div>
               {/if}
             </div>
             <button
-              class="rounded border border-[#0067B1] px-3 py-2 text-sm font-medium text-[#0067B1] hover:bg-blue-50"
+              class="rounded border border-[#0067B1] px-2 py-1 text-[11px] font-medium text-[#0067B1] hover:bg-blue-50 sm:px-2.5 sm:py-1.5 sm:text-xs md:px-3 md:py-2 md:text-sm"
               on:click={() => (helpOpen = true)}
             >
               YAML Reference
@@ -668,29 +680,29 @@
         </div>
       </section>
 
-      <section class="panel flex h-full min-h-0 flex-col rounded-lg overflow-hidden">
-        <div class="border-b border-gray-200 px-5 py-4">
-          <div class="flex items-center justify-between gap-3">
+      <section class="panel order-1 flex min-h-0 flex-col overflow-hidden rounded-lg md:order-2">
+        <div class="border-b border-gray-200 px-2.5 py-2 sm:px-3 sm:py-2.5 md:px-5 md:py-4">
+          <div class="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
             <div class="flex items-center gap-3">
-              <div class="text-sm font-semibold text-gray-800">SVG Preview</div>
+              <div class="text-xs font-semibold text-gray-800 sm:text-sm">SVG Preview</div>
               {#if isRendering}
-                <div class="text-xs font-medium uppercase tracking-wide text-[#0067B1]">Rendering…</div>
+                <div class="text-[11px] font-medium uppercase tracking-wide text-[#0067B1] sm:text-xs">Rendering…</div>
               {/if}
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-1.5 sm:gap-2">
               <div class="relative">
                 <button
-                  class="inline-flex items-center gap-2 rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:border-gray-400 hover:bg-gray-50"
+                  class="inline-flex items-center gap-1 rounded border border-gray-300 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 hover:border-gray-400 hover:bg-gray-50 sm:gap-1.5 sm:px-2.5 sm:py-1.5 sm:text-xs md:gap-2 md:px-3 md:py-2 md:text-sm"
                   on:click={() => void toggleShareMenu()}
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 md:h-4 md:w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M10 13a5 5 0 0 0 7.54.54l1.92-1.92a5 5 0 0 0-7.07-7.07L11.3 5.63" />
                     <path d="M14 11a5 5 0 0 0-7.54-.54L4.54 12.4a5 5 0 0 0 7.07 7.07l1.09-1.09" />
                   </svg>
                   Share
                 </button>
                 {#if shareOpen}
-                  <div class="absolute right-0 top-12 z-10 w-[28rem] rounded border border-gray-200 bg-white p-3 shadow-lg">
+                  <div class="absolute right-0 top-10 z-10 w-[min(28rem,calc(100vw-2rem))] rounded border border-gray-200 bg-white p-3 shadow-lg sm:top-12 sm:w-[28rem]">
                     <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Share Links</div>
                     <div class="mt-1 text-xs text-gray-600">
                       Generated from the current editor contents.
@@ -774,13 +786,13 @@
               <div class="relative">
                 <div class="inline-flex overflow-hidden rounded border border-[#0067B1] shadow-sm">
                   <button
-                    class="whitespace-nowrap bg-[#0067B1] px-3 py-2 text-sm font-medium text-white hover:bg-[#00558f]"
+                    class="whitespace-nowrap bg-[#0067B1] px-2 py-1 text-[11px] font-medium text-white hover:bg-[#00558f] sm:px-2.5 sm:py-1.5 sm:text-xs md:px-3 md:py-2 md:text-sm"
                     on:click={() => handleExport("svg")}
                   >
                     Export SVG
                   </button>
                   <button
-                    class="border-l border-blue-300 bg-[#0067B1] px-2 py-2 text-sm font-medium text-white hover:bg-[#00558f]"
+                    class="border-l border-blue-300 bg-[#0067B1] px-1.5 py-1 text-[11px] font-medium text-white hover:bg-[#00558f] sm:px-2 sm:py-1.5 sm:text-xs md:py-2 md:text-sm"
                     aria-label="Open export options"
                     on:click={() => {
                       shareOpen = false;
@@ -791,7 +803,7 @@
                   </button>
                 </div>
                 {#if exportOpen}
-                  <div class="absolute right-0 top-12 z-10 min-w-40 rounded border border-gray-200 bg-white p-1 shadow-lg">
+                  <div class="absolute right-0 top-10 z-10 min-w-40 rounded border border-gray-200 bg-white p-1 shadow-lg sm:top-12">
                     <button class="block w-full rounded px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50" on:click={() => handleExport("png")}>Export PNG</button>
                     <button class="block w-full rounded px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50" on:click={() => handleExport("pdf")}>Export PDF</button>
                   </div>
@@ -800,7 +812,7 @@
             </div>
           </div>
         </div>
-        <div class="min-h-0 flex-1 overflow-auto bg-gray-50 p-4" bind:this={previewHost}>
+        <div class="min-h-0 flex-1 overflow-auto bg-gray-50 p-2.5 sm:p-3 md:p-4" bind:this={previewHost}>
           <InteractivePreview
             {rendered}
             {error}
